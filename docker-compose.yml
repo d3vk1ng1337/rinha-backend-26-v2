@@ -4,6 +4,8 @@ services:
     command: ["/sockets/api1.sock", "/index/index.bin"]
     volumes:
       - sockets:/sockets
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
         limits:
@@ -15,6 +17,8 @@ services:
     command: ["/sockets/api2.sock", "/index/index.bin"]
     volumes:
       - sockets:/sockets
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
         limits:
@@ -29,6 +33,8 @@ services:
     ports:
       - "9999:9999"
     depends_on: [api1, api2]
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
         limits:
