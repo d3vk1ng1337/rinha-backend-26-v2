@@ -52,15 +52,14 @@ pub fn main(init: std.process.Init) !void {
 
     if (builtin.os.tag == .linux) {
         std.log.info("api: io_uring loop", .{});
-        try runIoUringLoop(ally, &reader, server.socket.handle);
+        try runIoUringLoop(&reader, server.socket.handle);
     } else {
         std.log.info("api: blocking loop", .{});
-        try runBlockingLoop(ally, io, &reader, &server);
+        try runBlockingLoop(io, &reader, &server);
     }
 }
 
 fn runBlockingLoop(
-    ally: std.mem.Allocator,
     io: std.Io,
     reader: *const index_format.Reader,
     server: *std.Io.net.Server,
@@ -70,7 +69,7 @@ fn runBlockingLoop(
             std.log.warn("accept error: {}", .{err});
             continue;
         };
-        handleConn(ally, io, reader, stream) catch |err| {
+        handleConn(io, reader, stream) catch |err| {
             std.log.warn("conn error: {}", .{err});
         };
         stream.close(io);
@@ -78,7 +77,6 @@ fn runBlockingLoop(
 }
 
 fn handleConn(
-    ally: std.mem.Allocator,
     io: std.Io,
     reader: *const index_format.Reader,
     stream: std.Io.net.Stream,
@@ -129,12 +127,14 @@ fn handleConn(
             try w.flush();
             return;
         }
-        const body = try ally.alloc(u8, content_length);
-        defer ally.free(body);
+        var body_buf: [max_request_bytes]u8 = undefined;
+        const body = body_buf[0..content_length];
         try r.readSliceAll(body);
 
+        var scratch: [scratch_bytes]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&scratch);
         var out_buf: [max_response_bytes]u8 = undefined;
-        const out = http_io.handle(ally, reader, body, &out_buf) catch {
+        const out = http_io.handle(fba.allocator(), reader, body, &out_buf) catch {
             try writeStatus(w, 500);
             try w.flush();
             return;
@@ -279,6 +279,7 @@ fn parseUserData(ud: u64) struct { idx: u32, op: Op } {
 
 const conn_pool_size: usize = 128;
 const ring_entries: u16 = 256;
+const scratch_bytes: usize = 8 * 1024;
 
 const Conn = struct {
     fd: i32 = -1,
@@ -287,13 +288,13 @@ const Conn = struct {
     out_buf: [max_response_bytes + 512]u8 = undefined,
     out_len: usize = 0,
     out_sent: usize = 0,
+    scratch: [scratch_bytes]u8 = undefined,
     state: State = .idle,
 
     const State = enum { idle, reading, writing, closing };
 };
 
 fn runIoUringLoop(
-    ally: std.mem.Allocator,
     reader: *const index_format.Reader,
     listen_fd: std.posix.fd_t,
 ) !void {
@@ -410,7 +411,8 @@ fn runIoUringLoop(
                             );
                         },
                         .ok => {
-                            const out = buildResponse(ally, reader, parsed.req, c.out_buf[0..]);
+                            var fba = std.heap.FixedBufferAllocator.init(c.scratch[0..]);
+                            const out = buildResponse(fba.allocator(), reader, parsed.req, c.out_buf[0..]);
                             c.out_len = out.len;
                             c.out_sent = 0;
                             c.state = .writing;
