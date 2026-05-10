@@ -60,6 +60,7 @@ pub fn cluster(
 }
 
 pub fn nearest(v: []const f32, centroids: []const f32, k: usize, dim: usize) u32 {
+    if (dim == 14) return nearest14(v[0..14], centroids, k);
     var best: u32 = 0;
     var best_d: f32 = std.math.inf(f32);
     var c: usize = 0;
@@ -78,6 +79,25 @@ pub fn nearest(v: []const f32, centroids: []const f32, k: usize, dim: usize) u32
     return best;
 }
 
+fn nearest14(v: *const [14]f32, centroids: []const f32, k: usize) u32 {
+    const V = @Vector(14, f32);
+    const qv: V = v.*;
+    var best: u32 = 0;
+    var best_d: f32 = std.math.inf(f32);
+    var c: usize = 0;
+    while (c < k) : (c += 1) {
+        const cv: V = centroids[c * 14 ..][0..14].*;
+        const diff = qv - cv;
+        const sq = diff * diff;
+        const d: f32 = @reduce(.Add, sq);
+        if (d < best_d) {
+            best_d = d;
+            best = @intCast(c);
+        }
+    }
+    return best;
+}
+
 pub fn topNCentroids(
     q: []const f32,
     centroids: []const f32,
@@ -87,9 +107,12 @@ pub fn topNCentroids(
     out_idx: []u32,
 ) void {
     std.debug.assert(out_idx.len >= top_n);
-    var top_d: [256]f32 = .{std.math.inf(f32)} ** 256;
     std.debug.assert(top_n <= 256);
-
+    if (dim == 14) {
+        topN14(q[0..14], centroids, k, top_n, out_idx);
+        return;
+    }
+    var top_d: [256]f32 = .{std.math.inf(f32)} ** 256;
     var c: usize = 0;
     while (c < k) : (c += 1) {
         var d: f32 = 0;
@@ -98,6 +121,45 @@ pub fn topNCentroids(
             const diff = q[j] - centroids[c * dim + j];
             d += diff * diff;
         }
+        if (d < top_d[top_n - 1]) {
+            var pos: usize = top_n - 1;
+            while (pos > 0 and top_d[pos - 1] > d) : (pos -= 1) {
+                top_d[pos] = top_d[pos - 1];
+                out_idx[pos] = out_idx[pos - 1];
+            }
+            top_d[pos] = d;
+            out_idx[pos] = @intCast(c);
+        }
+    }
+}
+
+fn topN14(q: *const [14]f32, centroids: []const f32, k: usize, top_n: u32, out_idx: []u32) void {
+    const V = @Vector(14, f32);
+    const qv: V = q.*;
+    var top_d: [256]f32 = .{std.math.inf(f32)} ** 256;
+    var c: usize = 0;
+    const prefetch_ahead: usize = 8;
+    while (c + prefetch_ahead < k) : (c += 1) {
+        @prefetch(&centroids[(c + prefetch_ahead) * 14], .{ .rw = .read, .locality = 0, .cache = .data });
+        const cv: V = centroids[c * 14 ..][0..14].*;
+        const diff = qv - cv;
+        const sq = diff * diff;
+        const d: f32 = @reduce(.Add, sq);
+        if (d < top_d[top_n - 1]) {
+            var pos: usize = top_n - 1;
+            while (pos > 0 and top_d[pos - 1] > d) : (pos -= 1) {
+                top_d[pos] = top_d[pos - 1];
+                out_idx[pos] = out_idx[pos - 1];
+            }
+            top_d[pos] = d;
+            out_idx[pos] = @intCast(c);
+        }
+    }
+    while (c < k) : (c += 1) {
+        const cv: V = centroids[c * 14 ..][0..14].*;
+        const diff = qv - cv;
+        const sq = diff * diff;
+        const d: f32 = @reduce(.Add, sq);
         if (d < top_d[top_n - 1]) {
             var pos: usize = top_n - 1;
             while (pos > 0 and top_d[pos - 1] > d) : (pos -= 1) {
