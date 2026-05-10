@@ -13,16 +13,54 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_OWNER: ${{ github.repository_owner }}
+  RINHA_RAW: https://raw.githubusercontent.com/zanfranceschi/rinha-de-backend-2026/main/resources
 
 jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      - name: Download rinha reference dataset
+        run: |
+          mkdir -p data
+          curl -fsSL "$RINHA_RAW/references.json.gz" -o data/references.json.gz
+          curl -fsSL "$RINHA_RAW/mcc_risk.json"      -o data/mcc_risk.json
+          curl -fsSL "$RINHA_RAW/normalization.json" -o data/normalization.json
+          ls -lh data/
+
+      - name: Build index
+        run: |
+          mkdir -p deploy
+          zig build -Doptimize=ReleaseFast run-builder -- \
+            data/references.json.gz deploy/index.bin
+          ls -lh deploy/index.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: index-bin
+          path: deploy/index.bin
+          retention-days: 1
+
   build:
+    needs: build-index
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        component: [api, builder, lb]
+        component: [api, lb]
     steps:
       - uses: actions/checkout@v4
+
+      - if: matrix.component == 'api'
+        uses: actions/download-artifact@v4
+        with:
+          name: index-bin
+          path: deploy/
 
       - uses: docker/setup-buildx-action@v3
 
