@@ -223,7 +223,7 @@ fn parseRequest(buf: []const u8) struct { status: ParseStatus, req: ParsedReques
     };
 }
 
-fn formatStatusOnly(out: []u8, code: u16) []u8 {
+fn formatStatusOnly(out: []u8, code: u16, close: bool) []u8 {
     const phrase: []const u8 = switch (code) {
         200 => "OK",
         400 => "Bad Request",
@@ -232,9 +232,16 @@ fn formatStatusOnly(out: []u8, code: u16) []u8 {
         500 => "Internal Server Error",
         else => "Error",
     };
+    if (close) {
+        return std.fmt.bufPrint(
+            out,
+            "HTTP/1.1 {d} {s}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            .{ code, phrase },
+        ) catch out[0..0];
+    }
     return std.fmt.bufPrint(
         out,
-        "HTTP/1.1 {d} {s}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {d} {s}\r\nContent-Length: 0\r\n\r\n",
         .{ code, phrase },
     ) catch out[0..0];
 }
@@ -244,23 +251,35 @@ fn buildResponse(
     reader: *const index_format.Reader,
     req: ParsedRequest,
     out: []u8,
+    close_hint: *bool,
 ) []u8 {
     if (std.mem.eql(u8, req.method, "GET") and std.mem.eql(u8, req.target, "/ready")) {
-        return formatStatusOnly(out, 200);
+        close_hint.* = false;
+        return formatStatusOnly(out, 200, false);
     }
     if (std.mem.eql(u8, req.method, "POST") and std.mem.eql(u8, req.target, "/fraud-score")) {
-        if (req.body.len > max_request_bytes) return formatStatusOnly(out, 413);
+        if (req.body.len > max_request_bytes) {
+            close_hint.* = true;
+            return formatStatusOnly(out, 413, true);
+        }
         var body_out: [max_response_bytes]u8 = undefined;
         const body_resp = http_io.handle(ally, reader, req.body, &body_out) catch {
-            return formatStatusOnly(out, 500);
+            close_hint.* = true;
+            return formatStatusOnly(out, 500, true);
         };
-        return std.fmt.bufPrint(
+        const r = std.fmt.bufPrint(
             out,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\n\r\n{s}",
             .{ body_resp.len, body_resp },
-        ) catch formatStatusOnly(out, 500);
+        ) catch {
+            close_hint.* = true;
+            return formatStatusOnly(out, 500, true);
+        };
+        close_hint.* = false;
+        return r;
     }
-    return formatStatusOnly(out, 404);
+    close_hint.* = true;
+    return formatStatusOnly(out, 404, true);
 }
 
 const Op = enum(u8) { accept = 1, read, write, close };
@@ -285,14 +304,59 @@ const Conn = struct {
     fd: i32 = -1,
     buf: [max_request_bytes + 4096]u8 = undefined,
     buf_len: usize = 0,
+    consumed_len: usize = 0,
     out_buf: [max_response_bytes + 512]u8 = undefined,
     out_len: usize = 0,
     out_sent: usize = 0,
     scratch: [scratch_bytes]u8 = undefined,
     state: State = .idle,
+    close_after_write: bool = false,
 
     const State = enum { idle, reading, writing, closing };
 };
+
+fn parseAndDispatch(
+    ring: *std.os.linux.IoUring,
+    reader: *const index_format.Reader,
+    c: *Conn,
+    idx: u32,
+) !void {
+    const parsed = parseRequest(c.buf[0..c.buf_len]);
+    switch (parsed.status) {
+        .incomplete => {
+            if (c.buf_len >= c.buf.len) {
+                const out = formatStatusOnly(c.out_buf[0..], 413, true);
+                c.out_len = out.len;
+                c.out_sent = 0;
+                c.consumed_len = c.buf_len;
+                c.close_after_write = true;
+                c.state = .writing;
+                _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_buf[0..c.out_len], 0);
+            } else {
+                c.state = .reading;
+                _ = try ring.read(makeUserData(idx, .read), c.fd, .{ .buffer = c.buf[c.buf_len..] }, 0);
+            }
+        },
+        .bad => {
+            const out = formatStatusOnly(c.out_buf[0..], 400, true);
+            c.out_len = out.len;
+            c.out_sent = 0;
+            c.consumed_len = c.buf_len;
+            c.close_after_write = true;
+            c.state = .writing;
+            _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_buf[0..c.out_len], 0);
+        },
+        .ok => {
+            var fba = std.heap.FixedBufferAllocator.init(c.scratch[0..]);
+            const out = buildResponse(fba.allocator(), reader, parsed.req, c.out_buf[0..], &c.close_after_write);
+            c.out_len = out.len;
+            c.out_sent = 0;
+            c.consumed_len = parsed.req.total_len;
+            c.state = .writing;
+            _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_buf[0..c.out_len], 0);
+        },
+    }
+}
 
 fn runIoUringLoop(
     reader: *const index_format.Reader,
@@ -374,56 +438,7 @@ fn runIoUringLoop(
                     }
                     const got: usize = @intCast(cqe.res);
                     c.buf_len += got;
-
-                    const parsed = parseRequest(c.buf[0..c.buf_len]);
-                    switch (parsed.status) {
-                        .incomplete => {
-                            if (c.buf_len >= c.buf.len) {
-                                const out = formatStatusOnly(c.out_buf[0..], 413);
-                                c.out_len = out.len;
-                                c.out_sent = 0;
-                                c.state = .writing;
-                                _ = try ring.write(
-                                    makeUserData(ud.idx, .write),
-                                    c.fd,
-                                    c.out_buf[0..c.out_len],
-                                    0,
-                                );
-                            } else {
-                                _ = try ring.read(
-                                    makeUserData(ud.idx, .read),
-                                    c.fd,
-                                    .{ .buffer = c.buf[c.buf_len..] },
-                                    0,
-                                );
-                            }
-                        },
-                        .bad => {
-                            const out = formatStatusOnly(c.out_buf[0..], 400);
-                            c.out_len = out.len;
-                            c.out_sent = 0;
-                            c.state = .writing;
-                            _ = try ring.write(
-                                makeUserData(ud.idx, .write),
-                                c.fd,
-                                c.out_buf[0..c.out_len],
-                                0,
-                            );
-                        },
-                        .ok => {
-                            var fba = std.heap.FixedBufferAllocator.init(c.scratch[0..]);
-                            const out = buildResponse(fba.allocator(), reader, parsed.req, c.out_buf[0..]);
-                            c.out_len = out.len;
-                            c.out_sent = 0;
-                            c.state = .writing;
-                            _ = try ring.write(
-                                makeUserData(ud.idx, .write),
-                                c.fd,
-                                c.out_buf[0..c.out_len],
-                                0,
-                            );
-                        },
-                    }
+                    try parseAndDispatch(&ring, reader, c, ud.idx);
                 },
                 .write => {
                     const c = &conns[ud.idx];
@@ -441,9 +456,31 @@ fn runIoUringLoop(
                             c.out_buf[c.out_sent..c.out_len],
                             0,
                         );
-                    } else {
+                        continue;
+                    }
+                    if (c.close_after_write) {
                         c.state = .closing;
                         _ = try ring.close(makeUserData(ud.idx, .close), c.fd);
+                        continue;
+                    }
+                    const leftover = c.buf_len - c.consumed_len;
+                    if (leftover > 0) {
+                        std.mem.copyForwards(u8, c.buf[0..leftover], c.buf[c.consumed_len..c.buf_len]);
+                    }
+                    c.buf_len = leftover;
+                    c.consumed_len = 0;
+                    c.out_len = 0;
+                    c.out_sent = 0;
+                    if (leftover > 0) {
+                        try parseAndDispatch(&ring, reader, c, ud.idx);
+                    } else {
+                        c.state = .reading;
+                        _ = try ring.read(
+                            makeUserData(ud.idx, .read),
+                            c.fd,
+                            .{ .buffer = c.buf[0..] },
+                            0,
+                        );
                     }
                 },
                 .close => {
