@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.builder
-    image: rinha26-builder:v1
+    image: rinha26-builder:dev
     volumes:
       - ./data:/data:ro
       - index:/index
@@ -18,7 +18,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    image: rinha26-api:v1
+    image: rinha26-api:dev
     volumes:
       - index:/index:ro
       - sockets:/sockets
@@ -36,7 +36,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    image: rinha26-api:v1
+    image: rinha26-api:dev
     volumes:
       - index:/index:ro
       - sockets:/sockets
@@ -54,7 +54,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.lb
-    image: rinha26-lb:v1
+    image: rinha26-lb:v2
+    command: ["0.0.0.0:9999", "/sockets/api1.sock", "/sockets/api2.sock"]
     volumes:
       - sockets:/sockets:ro
     ports:

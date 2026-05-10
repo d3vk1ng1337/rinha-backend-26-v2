@@ -5,3 +5,4 @@ pub const index_format = @import("index_format.zig");
 pub const search = @import("search.zig");
 pub const json_io = @import("json_io.zig");
 pub const http_io = @import("http_io.zig");
+pub const quant = @import("quant.zig");
