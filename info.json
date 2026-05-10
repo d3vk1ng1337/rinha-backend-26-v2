@@ -2,6 +2,6 @@
   "participants": ["Samuel Teixeira"],
   "social": ["https://github.com/steixeira93"],
   "source-code-repo": "https://github.com/steixeira93/rinha-backend-26-v2",
-  "stack": ["zig", "haproxy"],
+  "stack": ["zig", "io_uring"],
   "open_to_work": false
 }
