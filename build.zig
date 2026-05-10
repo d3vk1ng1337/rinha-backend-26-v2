@@ -15,14 +15,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(api);
 
+    const builder_module = b.createModule(.{
+        .root_source_file = b.path("cmd/builder/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    builder_module.addAnonymousImport("index_format", .{
+        .root_source_file = b.path("src/index_format.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const builder = b.addExecutable(.{
         .name = "builder",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("cmd/builder/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
+        .root_module = builder_module,
     });
     b.installArtifact(builder);
 
