@@ -6,20 +6,24 @@ pub fn build(b: *std.Build) void {
 
     const api = b.addExecutable(.{
         .name = "api",
-        .root_source_file = b.path("cmd/api/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("cmd/api/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
     });
-    api.linkLibC();
     b.installArtifact(api);
 
     const builder = b.addExecutable(.{
         .name = "builder",
-        .root_source_file = b.path("cmd/builder/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("cmd/builder/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
     });
-    builder.linkLibC();
     b.installArtifact(builder);
 
     const run_api = b.addRunArtifact(api);
@@ -42,11 +46,13 @@ pub fn build(b: *std.Build) void {
     };
     for (test_files) |file| {
         const t = b.addTest(.{
-            .root_source_file = b.path(file),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(file),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+            }),
         });
-        t.linkLibC();
         const run_t = b.addRunArtifact(t);
         test_step.dependOn(&run_t.step);
     }

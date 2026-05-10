@@ -1,8 +1,8 @@
 .{
     .name = .rinha_v2,
     .version = "0.1.0",
-    .fingerprint = 0xa1b2c3d4e5f60718,
-    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0x5b0d640fd3c2f72d,
+    .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
