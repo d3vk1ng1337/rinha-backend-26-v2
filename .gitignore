@@ -1,0 +1,15 @@
+# Zig
+.zig-cache/
+zig-out/
+
+# Data
+data/references.json.gz
+data/index.bin
+
+# OS
+.DS_Store
+*.swp
+
+# Editor
+.idea/
+.vscode/
