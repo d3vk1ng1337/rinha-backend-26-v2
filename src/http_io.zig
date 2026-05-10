@@ -21,7 +21,7 @@ pub fn handle(
     index_format.quantize14(&f, &q_int8);
     const q_bin = quant.quantizeBinary14(&f, reader.thresholds());
 
-    const top = search.search(reader, q_bin, &q_int8);
+    const top = search.search(reader, &f, q_bin, &q_int8);
     const fs = search.fraudScore(reader, top);
     const approved = fs < 0.6;
     return json_io.encodeResponse(out, .{ .approved = approved, .fraud_score = fs });
@@ -33,17 +33,16 @@ test "handle returns approved=true response when no frauds among top-5" {
     defer tmp.cleanup();
     const f = try tmp.dir.createFile(io, "idx.bin", .{ .read = true });
     defer f.close(io);
-    var w = try index_format.Writer.init(f, io, 10, 14);
-    try w.setThresholds(.{0} ** 14);
+    const labels = [_]bool{false} ** 10;
+    var codes: [10]u16 = undefined;
+    var int8: [10 * 14]i8 = undefined;
     var i: u64 = 0;
-    while (i < 10) : (i += 1) try w.writeBinary(@intCast(i));
-    i = 0;
     while (i < 10) : (i += 1) {
-        var v: [14]i8 = undefined;
-        for (&v) |*x| x.* = @intCast(i);
-        try w.writeInt8Vector(&v);
+        codes[i] = @intCast(i);
+        var d: usize = 0;
+        while (d < 14) : (d += 1) int8[i * 14 + d] = @intCast(i);
     }
-    try w.finalize();
+    try index_format.writeTestSingleCluster(testing.allocator, f, io, .{0} ** 14, &labels, &codes, &int8);
 
     const total = try f.length(io);
     const buf = try testing.allocator.alignedAlloc(u8, .of(index_format.Header), total);

@@ -54,9 +54,11 @@ pub fn main(init: std.process.Init) !void {
         const q_int8_slice = reader.vectorAt(q_idx);
         var q_int8: [14]i8 = undefined;
         @memcpy(&q_int8, q_int8_slice);
+        var q_f32: [14]f32 = undefined;
+        for (q_int8, 0..) |x, j| q_f32[j] = @as(f32, @floatFromInt(x)) / 127.0;
 
         const t0 = std.Io.Clock.Timestamp.now(io, .awake);
-        const v2_top = search.search(&reader, q_bin, &q_int8);
+        const v2_top = search.search(&reader, &q_f32, q_bin, &q_int8);
         const t1 = std.Io.Clock.Timestamp.now(io, .awake);
         const bf_top = bruteForceInt8(&reader, &q_int8);
         const t2 = std.Io.Clock.Timestamp.now(io, .awake);

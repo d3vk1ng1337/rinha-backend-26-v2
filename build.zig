@@ -94,6 +94,7 @@ pub fn build(b: *std.Build) void {
         "src/search.zig",
         "src/time_parse.zig",
         "src/quant.zig",
+        "src/kmeans.zig",
     };
     for (test_files) |file| {
         const t = b.addTest(.{

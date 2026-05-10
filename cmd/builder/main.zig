@@ -4,8 +4,11 @@ const json = std.json;
 const lib = @import("lib");
 const index_format = lib.index_format;
 const quant = lib.quant;
+const kmeans = lib.kmeans;
 
 const dim: usize = 14;
+const num_centroids: usize = 4096;
+const kmeans_iters: usize = 6;
 
 pub fn main(init: std.process.Init) !void {
     const ally = init.arena.allocator();
@@ -22,11 +25,10 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("builder: counted {} records", .{n});
 
     const floats = try ally.alloc(f32, n * dim);
-    const label_bytes = index_format.labelByteCount(n);
-    const labels = try ally.alloc(u8, label_bytes);
-    @memset(labels, 0);
+    const label_bits = try ally.alloc(bool, n);
+    @memset(label_bits, false);
 
-    try parseAll(ally, io, input, n, floats, labels);
+    try parseAll(ally, io, input, n, floats, label_bits);
     std.log.info("builder: parse complete", .{});
 
     var per_dim: [dim][]f32 = undefined;
@@ -46,28 +48,82 @@ pub fn main(init: std.process.Init) !void {
     }
     std.log.info("builder: thresholds computed", .{});
 
+    const centroids = try ally.alloc(f32, num_centroids * dim);
+    const assignments = try ally.alloc(u32, n);
+    std.log.info("builder: running k-means ({} centroids, {} iters)…", .{ num_centroids, kmeans_iters });
+    try kmeans.cluster(ally, floats, n, dim, num_centroids, kmeans_iters, centroids, assignments);
+    std.log.info("builder: k-means done", .{});
+
+    const cluster_counts = try ally.alloc(u32, num_centroids);
+    @memset(cluster_counts, 0);
+    {
+        var i: u64 = 0;
+        while (i < n) : (i += 1) cluster_counts[assignments[i]] += 1;
+    }
+
+    const cluster_offsets = try ally.alloc(u32, num_centroids + 1);
+    {
+        var acc: u32 = 0;
+        var c: usize = 0;
+        while (c < num_centroids) : (c += 1) {
+            cluster_offsets[c] = acc;
+            acc += cluster_counts[c];
+        }
+        cluster_offsets[num_centroids] = acc;
+        std.debug.assert(acc == n);
+    }
+
+    const reordered_codes = try ally.alloc(u16, n);
+    const reordered_int8 = try ally.alloc(i8, n * dim);
+    const label_bytes = index_format.labelByteCount(n);
+    const reordered_labels = try ally.alloc(u8, label_bytes);
+    @memset(reordered_labels, 0);
+
+    {
+        const cursor = try ally.alloc(u32, num_centroids);
+        defer ally.free(cursor);
+        @memcpy(cursor, cluster_offsets[0..num_centroids]);
+
+        var i: u64 = 0;
+        while (i < n) : (i += 1) {
+            const c = assignments[i];
+            const dst: u64 = cursor[c];
+            cursor[c] += 1;
+
+            const v_slice: *const [dim]f32 = floats[i * dim ..][0..dim];
+            reordered_codes[dst] = quant.quantizeBinary14(v_slice, &thresholds);
+
+            var q: [dim]i8 = undefined;
+            index_format.quantize14(v_slice, &q);
+            @memcpy(reordered_int8[dst * dim ..][0..dim], &q);
+
+            if (label_bits[i]) {
+                const dst_byte = dst / 8;
+                const dst_bit: u3 = @intCast(dst % 8);
+                reordered_labels[dst_byte] |= (@as(u8, 1) << dst_bit);
+            }
+
+            if ((i + 1) % 200_000 == 0) std.log.info("builder: reordered {}", .{i + 1});
+        }
+    }
+
+    std.log.info("builder: reorder done, writing V3 index", .{});
+
     const cwd = std.Io.Dir.cwd();
     const out_file = try cwd.createFile(io, output, .{ .read = true });
     defer out_file.close(io);
 
-    var w = try index_format.Writer.init(out_file, io, n, dim);
-    try w.setThresholds(thresholds);
-    try w.writeLabelsRaw(labels);
-
-    var i: u64 = 0;
-    while (i < n) : (i += 1) {
-        const v_slice: *const [dim]f32 = floats[i * dim ..][0..dim];
-        const code = quant.quantizeBinary14(v_slice, &thresholds);
-        try w.writeBinary(code);
-
-        var q: [dim]i8 = undefined;
-        index_format.quantize14(v_slice, &q);
-        try w.writeInt8Vector(&q);
-
-        if ((i + 1) % 200_000 == 0) std.log.info("builder: wrote {}", .{i + 1});
-    }
-
-    try w.finalize();
+    try index_format.writeAll(out_file, io, .{
+        .n = n,
+        .d = dim,
+        .k = num_centroids,
+        .thresholds = &thresholds,
+        .centroids = centroids,
+        .cluster_offsets = cluster_offsets,
+        .labels = reordered_labels,
+        .binary_codes = reordered_codes,
+        .int8_vectors = reordered_int8,
+    });
     std.log.info("builder: done", .{});
 }
 
@@ -106,7 +162,7 @@ fn parseAll(
     path: []const u8,
     n: u64,
     floats: []f32,
-    labels: []u8,
+    label_bits: []bool,
 ) !void {
     const cwd = std.Io.Dir.cwd();
     const file = try cwd.openFile(io, path, .{ .mode = .read_only });
@@ -130,7 +186,7 @@ fn parseAll(
             _ = try reader.next();
             break;
         }
-        try parseRecord(ally, &reader, idx, floats, labels);
+        try parseRecord(ally, &reader, idx, floats, label_bits);
         idx += 1;
         if (idx % 200_000 == 0) std.log.info("builder: read {}", .{idx});
     }
@@ -142,7 +198,7 @@ fn parseRecord(
     reader: *json.Reader,
     idx: u64,
     floats: []f32,
-    labels: []u8,
+    label_bits: []bool,
 ) !void {
     if (.object_begin != try reader.next()) return error.UnexpectedToken;
 
@@ -197,9 +253,5 @@ fn parseRecord(
     }
 
     if (!have_vector or !have_label) return error.MissingField;
-    if (label_fraud) {
-        const byte_idx = idx / 8;
-        const bit_idx: u3 = @intCast(idx % 8);
-        labels[byte_idx] |= (@as(u8, 1) << bit_idx);
-    }
+    label_bits[idx] = label_fraud;
 }
