@@ -4,7 +4,7 @@ const lib = @import("lib");
 const index_format = lib.index_format;
 const http_io = lib.http_io;
 
-const max_request_bytes: usize = 64 * 1024;
+const max_request_bytes: usize = 4 * 1024;
 const max_response_bytes: usize = 256;
 
 pub fn main(init: std.process.Init) !void {

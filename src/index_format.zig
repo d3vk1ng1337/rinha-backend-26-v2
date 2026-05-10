@@ -3,7 +3,7 @@ const testing = std.testing;
 const Io = std.Io;
 
 pub const magic: u64 = 0x52494E48413236;
-pub const version_v3: u32 = 3;
+pub const version_v4: u32 = 4;
 
 pub const Header = extern struct {
     magic: u64,
@@ -116,7 +116,7 @@ pub fn writeAll(file: std.Io.File, io: Io, p: WriteParams) !void {
         .magic = magic,
         .num_vectors = p.n,
         .dim = p.d,
-        .version = version_v3,
+        .version = version_v4,
         .num_centroids = @intCast(p.k),
     };
 
@@ -151,7 +151,7 @@ pub const Reader = struct {
         if (bytes.len < @sizeOf(Header)) return error.TooShort;
         const h = std.mem.bytesToValue(Header, bytes[0..@sizeOf(Header)]);
         if (h.magic != magic) return error.BadMagic;
-        if (h.version != version_v3) return error.UnsupportedVersion;
+        if (h.version != version_v4) return error.UnsupportedVersion;
 
         const k: u64 = h.num_centroids;
         const cb = centroidsByteCount(k, h.dim);
@@ -280,7 +280,7 @@ test "writer + reader v3 round-trip with single-cluster helper" {
 
     const r = try Reader.init(buf);
     try testing.expectEqual(@as(u64, 3), r.header.num_vectors);
-    try testing.expectEqual(@as(u32, version_v3), r.header.version);
+    try testing.expectEqual(@as(u32, version_v4), r.header.version);
     try testing.expectEqual(@as(u64, 14), r.header.dim);
     try testing.expectEqual(@as(u32, 1), r.header.num_centroids);
 

@@ -48,11 +48,24 @@ pub fn main(init: std.process.Init) !void {
     }
     std.log.info("builder: thresholds computed", .{});
 
-    const centroids = try ally.alloc(f32, num_centroids * dim);
+    const centroids_aos = try ally.alloc(f32, num_centroids * dim);
     const assignments = try ally.alloc(u32, n);
     std.log.info("builder: running k-means ({} centroids, {} iters)…", .{ num_centroids, kmeans_iters });
-    try kmeans.cluster(ally, floats, n, dim, num_centroids, kmeans_iters, centroids, assignments);
+    try kmeans.cluster(ally, floats, n, dim, num_centroids, kmeans_iters, centroids_aos, assignments);
     std.log.info("builder: k-means done", .{});
+
+    const centroids_soa = try ally.alloc(f32, num_centroids * dim);
+    {
+        var d: usize = 0;
+        while (d < dim) : (d += 1) {
+            var c: usize = 0;
+            while (c < num_centroids) : (c += 1) {
+                centroids_soa[d * num_centroids + c] = centroids_aos[c * dim + d];
+            }
+        }
+    }
+    ally.free(centroids_aos);
+    std.log.info("builder: centroids transposed to SoA", .{});
 
     const cluster_counts = try ally.alloc(u32, num_centroids);
     @memset(cluster_counts, 0);
@@ -118,7 +131,7 @@ pub fn main(init: std.process.Init) !void {
         .d = dim,
         .k = num_centroids,
         .thresholds = &thresholds,
-        .centroids = centroids,
+        .centroids = centroids_soa,
         .cluster_offsets = cluster_offsets,
         .labels = reordered_labels,
         .binary_codes = reordered_codes,

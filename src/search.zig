@@ -1,12 +1,13 @@
 const std = @import("std");
 const testing = std.testing;
 const index_format = @import("index_format.zig");
-const kmeans = @import("kmeans.zig");
 
 pub const k: usize = 5;
 pub const k_rerank: usize = 32;
-pub const num_probes: u32 = 4;
+pub const num_probes: u32 = 8;
 pub const dim: usize = 14;
+
+const V8 = @Vector(8, f32);
 
 pub fn search(
     reader: *const index_format.Reader,
@@ -17,19 +18,27 @@ pub fn search(
     var top_dist: [k_rerank]u32 = .{std.math.maxInt(u32)} ** k_rerank;
     var top_idx: [k_rerank]u64 = .{0} ** k_rerank;
 
-    const centroids = reader.centroids();
+    const centroids_soa = reader.centroids();
     const num_centroids: u32 = reader.header.num_centroids;
     const codes = reader.binaryCodes();
     const offsets = reader.clusterOffsets();
 
-    const probes_to_use: u32 = @min(num_probes, num_centroids);
-    var probe_idx: [num_probes]u32 = .{0} ** num_probes;
-    kmeans.topNCentroids(q_f32, centroids, num_centroids, dim, probes_to_use, probe_idx[0..]);
+    var probe_idx: [num_probes]u32 = .{std.math.maxInt(u32)} ** num_probes;
+    topNCentroidsSoA(q_f32, centroids_soa, num_centroids, num_probes, &probe_idx);
+
+    var unique_probes: [num_probes]u32 = undefined;
+    var n_unique: u32 = 0;
+    outer: for (probe_idx) |c| {
+        if (c == std.math.maxInt(u32)) continue;
+        for (unique_probes[0..n_unique]) |u| if (u == c) continue :outer;
+        unique_probes[n_unique] = c;
+        n_unique += 1;
+    }
 
     const prefetch_ahead: u64 = 64;
     var p: u32 = 0;
-    while (p < probes_to_use) : (p += 1) {
-        const c = probe_idx[p];
+    while (p < n_unique) : (p += 1) {
+        const c = unique_probes[p];
         const start: u64 = offsets[c];
         const end: u64 = offsets[c + 1];
         var i: u64 = start;
@@ -60,6 +69,61 @@ pub fn search(
     return rer_idx;
 }
 
+fn topNCentroidsSoA(
+    q: *const [dim]f32,
+    centroids_soa: []const f32,
+    nc: u32,
+    comptime top_n: u32,
+    out_idx: *[top_n]u32,
+) void {
+    var top_d: [top_n]f32 = .{std.math.inf(f32)} ** top_n;
+    const k_usize: usize = nc;
+
+    var c: usize = 0;
+    while (c + 8 <= k_usize) : (c += 8) {
+        var acc: V8 = @splat(@as(f32, 0));
+        comptime var d: usize = 0;
+        inline while (d < dim) : (d += 1) {
+            const qd: V8 = @splat(q[d]);
+            const base = d * k_usize + c;
+            const cv: V8 = centroids_soa[base..][0..8].*;
+            const diff = cv - qd;
+            acc = @mulAdd(V8, diff, diff, acc);
+        }
+        const arr: [8]f32 = acc;
+        comptime var lane: u32 = 0;
+        inline while (lane < 8) : (lane += 1) {
+            const di = arr[lane];
+            if (di < top_d[top_n - 1]) {
+                var pos: usize = top_n - 1;
+                while (pos > 0 and top_d[pos - 1] > di) : (pos -= 1) {
+                    top_d[pos] = top_d[pos - 1];
+                    out_idx[pos] = out_idx[pos - 1];
+                }
+                top_d[pos] = di;
+                out_idx[pos] = @intCast(c + lane);
+            }
+        }
+    }
+    while (c < k_usize) : (c += 1) {
+        var acc: f32 = 0;
+        comptime var d: usize = 0;
+        inline while (d < dim) : (d += 1) {
+            const diff = centroids_soa[d * k_usize + c] - q[d];
+            acc += diff * diff;
+        }
+        if (acc < top_d[top_n - 1]) {
+            var pos: usize = top_n - 1;
+            while (pos > 0 and top_d[pos - 1] > acc) : (pos -= 1) {
+                top_d[pos] = top_d[pos - 1];
+                out_idx[pos] = out_idx[pos - 1];
+            }
+            top_d[pos] = acc;
+            out_idx[pos] = @intCast(c);
+        }
+    }
+}
+
 fn insertSorted(comptime T: type, dist: []T, idx: []u64, d: T, i: u64) void {
     const len = dist.len;
     var pos: usize = len - 1;
@@ -79,7 +143,7 @@ pub fn fraudScore(reader: *const index_format.Reader, top: [k]u64) f32 {
     return @as(f32, @floatFromInt(c)) / @as(f32, k);
 }
 
-test "search v3 single-cluster finds nearest int8" {
+test "search v4 SoA single-cluster finds nearest int8" {
     const io = testing.io;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
