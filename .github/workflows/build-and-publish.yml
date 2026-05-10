@@ -36,7 +36,7 @@ jobs:
       - name: Build index
         run: |
           mkdir -p deploy
-          zig build -Doptimize=ReleaseFast run-builder -- \
+          zig build -Doptimize=ReleaseFast -Dcpu=haswell run-builder -- \
             data/references.json.gz deploy/index.bin
           ls -lh deploy/index.bin
 

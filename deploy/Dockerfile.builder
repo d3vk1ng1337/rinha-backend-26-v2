@@ -10,7 +10,7 @@ WORKDIR /src
 COPY build.zig build.zig.zon ./
 COPY src ./src
 COPY cmd ./cmd
-RUN zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl
+RUN zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Dcpu=haswell
 
 FROM --platform=linux/amd64 alpine:3.20
 COPY --from=build /src/zig-out/bin/builder /usr/local/bin/builder
