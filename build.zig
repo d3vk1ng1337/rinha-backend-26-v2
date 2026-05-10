@@ -4,14 +4,22 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const lib_path = b.path("src/api_lib.zig");
+
+    const api_module = b.createModule(.{
+        .root_source_file = b.path("cmd/api/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    api_module.addAnonymousImport("lib", .{
+        .root_source_file = lib_path,
+        .target = target,
+        .optimize = optimize,
+    });
     const api = b.addExecutable(.{
         .name = "api",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("cmd/api/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
+        .root_module = api_module,
     });
     b.installArtifact(api);
 
@@ -21,8 +29,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    builder_module.addAnonymousImport("index_format", .{
-        .root_source_file = b.path("src/index_format.zig"),
+    builder_module.addAnonymousImport("lib", .{
+        .root_source_file = lib_path,
         .target = target,
         .optimize = optimize,
     });

@@ -1,7 +1,8 @@
 const std = @import("std");
 const flate = std.compress.flate;
 const json = std.json;
-const index_format = @import("index_format");
+const lib = @import("lib");
+const index_format = lib.index_format;
 
 const dim: usize = 14;
 
