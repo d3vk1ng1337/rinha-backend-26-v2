@@ -34,7 +34,7 @@ Branch `submission` atual viola 1, 5, e parcialmente 7. O repo não tem LICENSE.
 | Branch `submission` tem `src/`, `cmd/`, `build.zig` | Limpar: deixar só `docker-compose.yml`, `info.json`, `LICENSE`, `README.md` |
 | Sem `LICENSE` MIT | Adicionar `LICENSE` MIT em `main` |
 | `info.json.stack` ainda lista `haproxy` | Substituir por `["zig", "io_uring"]` |
-| `participants/steixeira93.json` no rinha aponta só pro Go HNSW antigo | Adicionar entrada `steixeira93-zig-v2` ao array existente |
+| `participants/steixeira93.json` no rinha aponta só pro Go HNSW antigo | Substituir pela entrada `steixeira93-zig-v2` (foco em V2; o repo Go HNSW não é tocado) |
 
 ## Arquitetura final
 
@@ -143,14 +143,10 @@ Sem `src/`, sem `cmd/`, sem `build.zig`, sem `data/`, sem Dockerfiles. Resetada 
 
 ### Entrada no rinha repo
 
-`participants/steixeira93.json` (mantém a entrada antiga + adiciona a nova):
+`participants/steixeira93.json` é substituído integralmente pela entrada da V2 — o repo `rinha-backend-26` (Go HNSW) **não é modificado**, só sua referência sai do JSON do rinha. Resultados históricos do Go HNSW seguem no repo de resultados (keyed por `[participant][submission_id]`).
 
 ```json
 [
-  {
-    "id": "steixeira93-go-hnsw",
-    "repo": "https://github.com/steixeira93/rinha-backend-26"
-  },
   {
     "id": "steixeira93-zig-v2",
     "repo": "https://github.com/steixeira93/rinha-backend-26-v2"

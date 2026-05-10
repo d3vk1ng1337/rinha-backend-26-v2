@@ -617,20 +617,7 @@ Expected: apenas `LICENSE`, `README.md`, `docker-compose.yml`, `info.json`.
 
 ### Task 11: Fork + branch + edit
 
-> **Risco**: o workflow `auto-merge-participant.yml` valida e roda smoke-test em **todos** os repos listados no JSON. Se o repo antigo (`rinha-backend-26`, Go HNSW) tiver perdido a branch `submission` ou seu compose estiver quebrado, este PR será rejeitado. Step 0 verifica isso antes.
-
-- [ ] **Step 0: Verificar saúde do repo Go HNSW antigo**
-
-```bash
-git ls-remote --heads https://github.com/steixeira93/rinha-backend-26 | grep -E 'refs/heads/(main|submission)'
-```
-
-Expected: ambas as branches existem. Se faltar `submission`, há duas saídas:
-
-1. (Recomendado) Remover a entrada `steixeira93-go-hnsw` do JSON na Task 11 Step 4 — ficamos só com a Zig V2.
-2. Restaurar a branch `submission` no repo antigo antes de prosseguir.
-
-Decidir antes de continuar.
+> **Não modificamos o repo `rinha-backend-26` (Go HNSW)** — ele é de uma submissão diferente. O PR substitui a entrada antiga pela V2 no JSON do rinha; os resultados históricos do Go HNSW seguem preservados no repo de resultados (que é keyed por `[participant][submission_id]`, separado do `participants/`).
 
 - [ ] **Step 1: Verificar/criar fork**
 
@@ -659,22 +646,20 @@ git push origin main
 git checkout -b add-steixeira93-zig-v2
 ```
 
-- [ ] **Step 4: Editar `participants/steixeira93.json` (manter Go HNSW + adicionar Zig V2)**
+- [ ] **Step 4: Substituir `participants/steixeira93.json` pela Zig V2**
 
-Substituir o conteúdo de `participants/steixeira93.json` por:
+Substituir o conteúdo inteiro por:
 
 ```json
 [
-  {
-    "id": "steixeira93-go-hnsw",
-    "repo": "https://github.com/steixeira93/rinha-backend-26"
-  },
   {
     "id": "steixeira93-zig-v2",
     "repo": "https://github.com/steixeira93/rinha-backend-26-v2"
   }
 ]
 ```
+
+> A entrada antiga `steixeira93-go-hnsw` é removida do JSON da rinha. O repo `rinha-backend-26` em si não é tocado — só sua referência aqui sai. Resultados históricos do Go HNSW continuam no repo de resultados.
 
 - [ ] **Step 5: Validar JSON contra o schema do auto-merge workflow**
 
