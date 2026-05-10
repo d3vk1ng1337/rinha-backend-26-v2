@@ -1,0 +1,27 @@
+{
+  "id": "11111111-2222-3333-4444-555555555555",
+  "transaction": {
+    "amount": 250.0,
+    "installments": 3,
+    "requested_at": "2025-11-15T14:30:00Z"
+  },
+  "customer": {
+    "avg_amount": 100.0,
+    "tx_count_24h": 4,
+    "known_merchants": ["m1", "m2"]
+  },
+  "merchant": {
+    "id": "m3",
+    "mcc": "5411",
+    "avg_amount": 200.0
+  },
+  "terminal": {
+    "is_online": true,
+    "card_present": true,
+    "km_from_home": 5.2
+  },
+  "last_transaction": {
+    "timestamp": "2025-11-15T13:45:00Z",
+    "km_from_current": 3.1
+  }
+}

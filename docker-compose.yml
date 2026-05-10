@@ -1,0 +1,73 @@
+services:
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.builder
+    image: rinha26-builder:v1
+    volumes:
+      - ./data:/data:ro
+      - index:/index
+    command: ["/data/references.json.gz", "/index/index.bin"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "200M"
+
+  api1:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: rinha26-api:v1
+    volumes:
+      - index:/index:ro
+      - sockets:/sockets
+    command: ["/sockets/api1.sock", "/index/index.bin"]
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: "100M"
+
+  api2:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: rinha26-api:v1
+    volumes:
+      - index:/index:ro
+      - sockets:/sockets
+    command: ["/sockets/api2.sock", "/index/index.bin"]
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: "100M"
+
+  lb:
+    build:
+      context: .
+      dockerfile: Dockerfile.lb
+    image: rinha26-lb:v1
+    volumes:
+      - sockets:/sockets:ro
+    ports:
+      - "9999:9999"
+    depends_on:
+      - api1
+      - api2
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: "20M"
+
+volumes:
+  index:
+  sockets:

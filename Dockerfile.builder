@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1.7
+FROM --platform=linux/amd64 alpine:3.20 AS build
+RUN apk add --no-cache curl xz
+ARG ZIG_VERSION=0.16.0
+RUN curl -fsSL https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz \
+    | tar -xJ -C /opt && mv /opt/zig-* /opt/zig
+ENV PATH="/opt/zig:${PATH}"
+
+WORKDIR /src
+COPY build.zig build.zig.zon ./
+COPY src ./src
+COPY cmd ./cmd
+RUN zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl
+
+FROM --platform=linux/amd64 alpine:3.20
+COPY --from=build /src/zig-out/bin/builder /usr/local/bin/builder
+ENTRYPOINT ["/usr/local/bin/builder"]
