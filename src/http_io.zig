@@ -4,6 +4,7 @@ const vec = @import("vec.zig");
 const search = @import("search.zig");
 const json_io = @import("json_io.zig");
 const index_format = @import("index_format.zig");
+const quant = @import("quant.zig");
 
 pub fn handle(
     ally: std.mem.Allocator,
@@ -15,11 +16,12 @@ pub fn handle(
     defer p.deinit();
 
     var f: [vec.dim]f32 = undefined;
-    var q: [vec.dim]i8 = undefined;
+    var q_int8: [vec.dim]i8 = undefined;
     vec.buildFloat(&p.value, &f);
-    index_format.quantize14(&f, &q);
+    index_format.quantize14(&f, &q_int8);
+    const q_bin = quant.quantizeBinary14(&f, reader.thresholds());
 
-    const top = search.search(reader, &q);
+    const top = search.search(reader, q_bin, &q_int8);
     const fs = search.fraudScore(reader, top);
     const approved = fs < 0.6;
     return json_io.encodeResponse(out, .{ .approved = approved, .fraud_score = fs });
@@ -32,11 +34,14 @@ test "handle returns approved=true response when no frauds among top-5" {
     const f = try tmp.dir.createFile(io, "idx.bin", .{ .read = true });
     defer f.close(io);
     var w = try index_format.Writer.init(f, io, 10, 14);
+    try w.setThresholds(.{0} ** 14);
     var i: u64 = 0;
+    while (i < 10) : (i += 1) try w.writeBinary(@intCast(i));
+    i = 0;
     while (i < 10) : (i += 1) {
         var v: [14]i8 = undefined;
         for (&v) |*x| x.* = @intCast(i);
-        try w.writeVector(&v);
+        try w.writeInt8Vector(&v);
     }
     try w.finalize();
 
