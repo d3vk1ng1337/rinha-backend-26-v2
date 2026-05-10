@@ -6,11 +6,15 @@ services:
       - sockets:/sockets
     security_opt:
       - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "150M"
+          cpus: "0.40"
+          memory: "160M"
 
   api2:
     image: ghcr.io/steixeira93/rinha-backend-26-v2-api:latest
@@ -19,11 +23,15 @@ services:
       - sockets:/sockets
     security_opt:
       - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "150M"
+          cpus: "0.40"
+          memory: "160M"
 
   lb:
     image: ghcr.io/steixeira93/rinha-backend-26-v2-lb:latest
@@ -35,10 +43,14 @@ services:
     depends_on: [api1, api2]
     security_opt:
       - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     deploy:
       resources:
         limits:
-          cpus: "0.10"
+          cpus: "0.20"
           memory: "30M"
 
 volumes:
