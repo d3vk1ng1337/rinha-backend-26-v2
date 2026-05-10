@@ -6,8 +6,9 @@ Submissão V2 para a [Rinha de Backend 2026](https://github.com/zanfranceschi/ri
 
 ## Stack
 
-- Zig 0.14
-- HAProxy 2.9 (load balancer, round-robin estrito via unix sockets)
+- Zig 0.16
+- LB próprio em Zig sobre `io_uring` (round-robin via unix sockets)
+- API io_uring no Linux com fallback bloqueante no macOS
 - mmap shared index em volume Docker
 
 Design completo: `docs/superpowers/specs/`. Plano V1: `docs/superpowers/plans/2026-05-10-rinha-v1-zig.md`.
