@@ -5,6 +5,7 @@ zig-out/
 # Data
 data/references.json.gz
 data/index.bin
+deploy/index.bin
 
 # OS
 .DS_Store
