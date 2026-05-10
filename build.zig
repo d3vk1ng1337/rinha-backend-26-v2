@@ -57,6 +57,7 @@ pub fn build(b: *std.Build) void {
         "src/index_format.zig",
         "src/search.zig",
         "src/time_parse.zig",
+        "src/quant.zig",
     };
     for (test_files) |file| {
         const t = b.addTest(.{
