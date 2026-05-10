@@ -54,7 +54,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.lb
-    image: rinha26-lb:dev
+    image: rinha26-lb:v2
+    command: ["0.0.0.0:9999", "/sockets/api1.sock", "/sockets/api2.sock"]
     volumes:
       - sockets:/sockets:ro
     ports:
