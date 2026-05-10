@@ -5,7 +5,7 @@ const kmeans = @import("kmeans.zig");
 
 pub const k: usize = 5;
 pub const k_rerank: usize = 32;
-pub const num_probes: u32 = 8;
+pub const num_probes: u32 = 4;
 pub const dim: usize = 14;
 
 pub fn search(

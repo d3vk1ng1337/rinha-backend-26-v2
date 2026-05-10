@@ -8,7 +8,7 @@ const kmeans = lib.kmeans;
 
 const dim: usize = 14;
 const num_centroids: usize = 4096;
-const kmeans_iters: usize = 6;
+const kmeans_iters: usize = 3;
 
 pub fn main(init: std.process.Init) !void {
     const ally = init.arena.allocator();
