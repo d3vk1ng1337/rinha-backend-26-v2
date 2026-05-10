@@ -14,7 +14,13 @@ pub fn search(
     var top_idx: [k_rerank]u64 = .{0} ** k_rerank;
 
     const codes = reader.binary_codes;
+    const prefetch_ahead: usize = 256;
     var i: u64 = 0;
+    while (i + prefetch_ahead < codes.len) : (i += 1) {
+        @prefetch(&codes[i + prefetch_ahead], .{ .rw = .read, .locality = 0, .cache = .data });
+        const d: u32 = @popCount(codes[i] ^ q_bin);
+        if (d < top_dist[k_rerank - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
+    }
     while (i < codes.len) : (i += 1) {
         const d: u32 = @popCount(codes[i] ^ q_bin);
         if (d < top_dist[k_rerank - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
