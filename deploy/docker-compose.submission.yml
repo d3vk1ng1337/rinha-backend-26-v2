@@ -1,0 +1,39 @@
+services:
+  api1:
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:latest
+    command: ["/sockets/api1.sock", "/index/index.bin"]
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: "150M"
+
+  api2:
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:latest
+    command: ["/sockets/api2.sock", "/index/index.bin"]
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: "150M"
+
+  lb:
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-lb:latest
+    command: ["0.0.0.0:9999", "/sockets/api1.sock", "/sockets/api2.sock"]
+    volumes:
+      - sockets:/sockets:ro
+    ports:
+      - "9999:9999"
+    depends_on: [api1, api2]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: "30M"
+
+volumes:
+  sockets:
