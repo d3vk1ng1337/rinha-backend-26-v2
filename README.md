@@ -2,7 +2,7 @@
 
 Submissão V2 para a [Rinha de Backend 2026](https://github.com/zanfranceschi/rinha-de-backend-2026) — detecção de fraude por busca vetorial, em **Zig**.
 
-**Status:** V1 baseline (int8 brute-force, mmap-shared index, HAProxy LB).
+**Status:** V2.1 (binary quant + int8 rerank): local p50 6.0 ms / p99 9.9 ms (vs V1 baseline p50 10.2 / p99 37.7 ms).
 
 ## Stack
 
