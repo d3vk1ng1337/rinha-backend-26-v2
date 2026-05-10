@@ -124,6 +124,11 @@ pub const Writer = struct {
         try self.file.writePositionalAll(self.io, &b, self.label_offset + byte_idx);
     }
 
+    pub fn writeLabelsRaw(self: *Writer, bytes: []const u8) !void {
+        std.debug.assert(bytes.len == labelByteCount(self.header.num_vectors));
+        try self.file.writePositionalAll(self.io, bytes, self.label_offset);
+    }
+
     pub fn finalize(self: *Writer) !void {
         std.debug.assert(self.written_binaries == self.header.num_vectors);
         std.debug.assert(self.written_int8 == self.header.num_vectors);

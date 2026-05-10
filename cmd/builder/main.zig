@@ -3,6 +3,7 @@ const flate = std.compress.flate;
 const json = std.json;
 const lib = @import("lib");
 const index_format = lib.index_format;
+const quant = lib.quant;
 
 const dim: usize = 14;
 
@@ -20,12 +21,52 @@ pub fn main(init: std.process.Init) !void {
     const n = try countRecords(ally, io, input);
     std.log.info("builder: counted {} records", .{n});
 
+    const floats = try ally.alloc(f32, n * dim);
+    const label_bytes = index_format.labelByteCount(n);
+    const labels = try ally.alloc(u8, label_bytes);
+    @memset(labels, 0);
+
+    try parseAll(ally, io, input, n, floats, labels);
+    std.log.info("builder: parse complete", .{});
+
+    var per_dim: [dim][]f32 = undefined;
+    {
+        var d: usize = 0;
+        while (d < dim) : (d += 1) {
+            const slice = try ally.alloc(f32, n);
+            var i: u64 = 0;
+            while (i < n) : (i += 1) slice[i] = floats[i * dim + d];
+            per_dim[d] = slice;
+        }
+    }
+    const thresholds = try quant.computeThresholds(ally, &per_dim);
+    {
+        var d: usize = 0;
+        while (d < dim) : (d += 1) ally.free(per_dim[d]);
+    }
+    std.log.info("builder: thresholds computed", .{});
+
     const cwd = std.Io.Dir.cwd();
     const out_file = try cwd.createFile(io, output, .{ .read = true });
     defer out_file.close(io);
 
     var w = try index_format.Writer.init(out_file, io, n, dim);
-    try walkAndWrite(ally, io, input, &w);
+    try w.setThresholds(thresholds);
+    try w.writeLabelsRaw(labels);
+
+    var i: u64 = 0;
+    while (i < n) : (i += 1) {
+        const v_slice: *const [dim]f32 = floats[i * dim ..][0..dim];
+        const code = quant.quantizeBinary14(v_slice, &thresholds);
+        try w.writeBinary(code);
+
+        var q: [dim]i8 = undefined;
+        index_format.quantize14(v_slice, &q);
+        try w.writeInt8Vector(&q);
+
+        if ((i + 1) % 200_000 == 0) std.log.info("builder: wrote {}", .{i + 1});
+    }
+
     try w.finalize();
     std.log.info("builder: done", .{});
 }
@@ -59,7 +100,14 @@ fn countRecords(ally: std.mem.Allocator, io: std.Io, path: []const u8) !u64 {
     return n;
 }
 
-fn walkAndWrite(ally: std.mem.Allocator, io: std.Io, path: []const u8, w: *index_format.Writer) !void {
+fn parseAll(
+    ally: std.mem.Allocator,
+    io: std.Io,
+    path: []const u8,
+    n: u64,
+    floats: []f32,
+    labels: []u8,
+) !void {
     const cwd = std.Io.Dir.cwd();
     const file = try cwd.openFile(io, path, .{ .mode = .read_only });
     defer file.close(io);
@@ -82,24 +130,26 @@ fn walkAndWrite(ally: std.mem.Allocator, io: std.Io, path: []const u8, w: *index
             _ = try reader.next();
             break;
         }
-        try parseAndWriteRecord(ally, &reader, w, idx);
+        try parseRecord(ally, &reader, idx, floats, labels);
         idx += 1;
-        if (idx % 200_000 == 0) std.log.info("builder: wrote {}", .{idx});
+        if (idx % 200_000 == 0) std.log.info("builder: read {}", .{idx});
     }
+    if (idx != n) return error.RecordCountMismatch;
 }
 
-fn parseAndWriteRecord(
+fn parseRecord(
     ally: std.mem.Allocator,
     reader: *json.Reader,
-    w: *index_format.Writer,
     idx: u64,
+    floats: []f32,
+    labels: []u8,
 ) !void {
     if (.object_begin != try reader.next()) return error.UnexpectedToken;
 
-    var f: [dim]f32 = undefined;
     var have_vector = false;
-    var label_fraud = false;
     var have_label = false;
+    var label_fraud = false;
+    const base = idx * dim;
 
     while (true) {
         const tt = try reader.peekNextTokenType();
@@ -128,7 +178,7 @@ fn parseAndWriteRecord(
                     else => return error.UnexpectedToken,
                 };
                 if (i >= dim) return error.TooManyFields;
-                f[i] = try std.fmt.parseFloat(f32, slice);
+                floats[base + i] = try std.fmt.parseFloat(f32, slice);
                 i += 1;
             }
             if (i != dim) return error.WrongVectorLength;
@@ -147,9 +197,9 @@ fn parseAndWriteRecord(
     }
 
     if (!have_vector or !have_label) return error.MissingField;
-
-    var q: [dim]i8 = undefined;
-    index_format.quantize14(&f, &q);
-    try w.writeVector(&q);
-    if (label_fraud) try w.setLabel(idx, true);
+    if (label_fraud) {
+        const byte_idx = idx / 8;
+        const bit_idx: u3 = @intCast(idx % 8);
+        labels[byte_idx] |= (@as(u8, 1) << bit_idx);
+    }
 }
