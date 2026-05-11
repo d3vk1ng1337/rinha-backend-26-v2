@@ -19,10 +19,15 @@ Top 3 (~5853 pts).
 
 ## Em fila (modo autônomo)
 
-| Issue | Versão | Status |
-|---|---|---|
-| 3131 | pre-baked + keep-alive | em fila |
-| 3140 | multi-thread 3 workers io_uring | em fila |
+| Issue | Versão | Valid | Fail% | Score |
+|---|---|---:|---:|---:|
+| 3131 | pre-baked + keep-alive | 3621 | 93.43 | -6000 |
+| 3140 | multi-thread 3 workers io_uring | **5393** | **90.23** | -6000 |
+
+Melhor resultado até agora: #3140 com 5393 valid. Multi-thread funcionou.
+Mas failure_rate ainda 90% > 15% cap → score travado em -6000.
+
+Próximo passo: trocar LB Zig custom por nginx.
 
 ## Fases preparadas em standby
 
