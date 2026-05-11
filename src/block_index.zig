@@ -6,6 +6,7 @@ pub const header_size: usize = 64;
 pub const magic: u64 = 0x3256_4949_484E_4952;
 pub const version: u32 = 1;
 pub const default_nprobe_fast: usize = 12;
+pub const default_nprobe_full: usize = 24;
 pub const max_clusters: usize = 16_384;
 const q16_scale: f32 = 0.0001;
 const q16_dist_scale: f32 = 1e-8;
@@ -170,6 +171,20 @@ pub fn searchFraudCount(reader: *const Reader, query: *const [dims]f32, comptime
     return count;
 }
 
+pub fn searchFraudCountTwoTier(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    comptime nprobe_fast: usize,
+    comptime nprobe_full: usize,
+) u8 {
+    const top = searchTop5TwoTier(reader, query, nprobe_fast, nprobe_full);
+    var count: u8 = 0;
+    for (top.labels) |label| {
+        if (label == 1) count += 1;
+    }
+    return count;
+}
+
 const Top5 = struct {
     dists: [5]f32 = .{std.math.inf(f32)} ** 5,
     labels: [5]u8 = .{0} ** 5,
@@ -236,6 +251,58 @@ fn searchTop5(reader: *const Reader, query: *const [dims]f32, comptime nprobe_fa
             if (isScanned(&scanned, ci)) continue;
             if (bboxLowerBoundF32(reader, ci, &q16) >= top.worst()) continue;
             scanCluster(reader, ci, query, &top);
+        }
+    }
+
+    return top;
+}
+
+fn searchTop5TwoTier(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    comptime nprobe_fast: usize,
+    comptime nprobe_full: usize,
+) Top5 {
+    comptime {
+        std.debug.assert(nprobe_fast > 0);
+        std.debug.assert(nprobe_full >= nprobe_fast);
+        std.debug.assert(nprobe_full <= max_clusters);
+    }
+    const k: usize = @intCast(reader.k);
+
+    var probe_d: [nprobe_full]f32 = .{std.math.inf(f32)} ** nprobe_full;
+    var probe_i: [nprobe_full]u32 = .{std.math.maxInt(u32)} ** nprobe_full;
+
+    var c: usize = 0;
+    while (c < k) : (c += 1) {
+        var cd: f32 = 0;
+        comptime var d: usize = 0;
+        inline while (d < dims) : (d += 1) {
+            const diff = reader.centroidAt(d, c) - query[d];
+            cd += diff * diff;
+        }
+        insertProbe(nprobe_full, &probe_d, &probe_i, cd, @intCast(c));
+    }
+
+    var top = Top5{};
+    inline for (0..nprobe_fast) |pi| {
+        const pc = probe_i[pi];
+        if (pc != std.math.maxInt(u32)) {
+            scanCluster(reader, pc, query, &top);
+        }
+    }
+
+    var fraud_count: u8 = 0;
+    for (top.labels) |label| {
+        if (label == 1) fraud_count += 1;
+    }
+
+    if (fraud_count == 2 or fraud_count == 3) {
+        inline for (nprobe_fast..nprobe_full) |pi| {
+            const pc = probe_i[pi];
+            if (pc != std.math.maxInt(u32)) {
+                scanCluster(reader, pc, query, &top);
+            }
         }
     }
 

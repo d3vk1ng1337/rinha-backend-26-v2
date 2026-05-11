@@ -4,7 +4,28 @@ const block_index = lib.block_index;
 const fast_parser = lib.fast_parser;
 
 const dim = block_index.dims;
-const nprobe_variants = [_]usize{ 8, 9, 10, 11, 12, 16, 24 };
+const variants = [_]Variant{
+    .{ .name = "prod_fast12_bbox_all", .mode = .bbox_all, .fast = 12, .full = 0 },
+    .{ .name = "fast12_full24", .mode = .two_tier, .fast = 12, .full = 24 },
+    .{ .name = "fast5_full32", .mode = .two_tier, .fast = 5, .full = 32 },
+    .{ .name = "fast8_full32", .mode = .two_tier, .fast = 8, .full = 32 },
+    .{ .name = "fast12_full32", .mode = .two_tier, .fast = 12, .full = 32 },
+    .{ .name = "fast5_full48", .mode = .two_tier, .fast = 5, .full = 48 },
+    .{ .name = "fast8_full48", .mode = .two_tier, .fast = 8, .full = 48 },
+    .{ .name = "fast12_full48", .mode = .two_tier, .fast = 12, .full = 48 },
+    .{ .name = "fast5_full64", .mode = .two_tier, .fast = 5, .full = 64 },
+    .{ .name = "fast8_full64", .mode = .two_tier, .fast = 8, .full = 64 },
+    .{ .name = "fast12_full64", .mode = .two_tier, .fast = 12, .full = 64 },
+};
+
+const Variant = struct {
+    const Mode = enum { bbox_all, two_tier };
+
+    name: []const u8,
+    mode: Mode,
+    fast: usize,
+    full: usize,
+};
 
 const Hist = struct {
     fraud_by_count: [6]u64 = .{0} ** 6,
@@ -48,7 +69,7 @@ pub fn main(init: std.process.Init) !void {
     const data = try ally.alloc(u8, test_len);
     _ = try test_file.readPositionalAll(io, data, 0);
 
-    var hists: [nprobe_variants.len]Hist = .{Hist{}} ** nprobe_variants.len;
+    var hists: [variants.len]Hist = .{Hist{}} ** variants.len;
     var parse_errors: u64 = 0;
     var entries: u64 = 0;
 
@@ -66,9 +87,12 @@ pub fn main(init: std.process.Init) !void {
             continue;
         };
 
-        inline for (nprobe_variants, 0..) |nprobe, vi| {
+        inline for (variants, 0..) |variant, vi| {
             const t0 = std.Io.Clock.Timestamp.now(io, .awake);
-            const count = block_index.searchFraudCount(&reader, &f, nprobe);
+            const count = switch (variant.mode) {
+                .bbox_all => block_index.searchFraudCount(&reader, &f, variant.fast),
+                .two_tier => block_index.searchFraudCountTwoTier(&reader, &f, variant.fast, variant.full),
+            };
             const t1 = std.Io.Clock.Timestamp.now(io, .awake);
             hists[vi].search_time_ns += t0.durationTo(t1).raw.nanoseconds;
 
@@ -96,10 +120,10 @@ pub fn main(init: std.process.Init) !void {
         legit_total,
     });
 
-    inline for (nprobe_variants, 0..) |nprobe, vi| {
+    inline for (variants, 0..) |variant, vi| {
         const hist = hists[vi];
         const mean_us = @as(f64, @floatFromInt(@as(i64, @intCast(hist.search_time_ns)))) / total_f / 1000.0;
-        std.log.info("=== nprobe={} mean_search={d:.2}us ===", .{ nprobe, mean_us });
+        std.log.info("=== {s} mean_search={d:.2}us ===", .{ variant.name, mean_us });
         var c: usize = 0;
         while (c <= 5) : (c += 1) {
             std.log.info("count={} fraud={} legit={}", .{ c, hist.fraud_by_count[c], hist.legit_by_count[c] });

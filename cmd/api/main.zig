@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const lib = @import("lib");
 const block_index = lib.block_index;
 const http_io = lib.http_io;
+const fdpass = lib.fdpass;
+const linux = std.os.linux;
 
 pub const std_options: std.Options = .{
     .log_level = .err,
@@ -67,22 +69,41 @@ pub fn main(init: std.process.Init) !void {
 
     std.log.info("api: io_uring loop, {} workers", .{num_workers});
 
+    const ctrl_path_z = try std.mem.concatWithSentinel(ally, u8, &.{ sock_path, ".ctrl" }, 0);
+    const ctrl_fd = try fdpass.openUnixListener(ctrl_path_z);
+    defer fdpass.closeFd(ctrl_fd);
+    if (std.c.chmod(ctrl_path_z.ptr, 0o666) != 0) std.log.warn("chmod failed on {s}", .{ctrl_path_z});
+
+    const event_r = linux.eventfd(0, linux.EFD.CLOEXEC);
+    if (linux.errno(event_r) != .SUCCESS) return error.EventFdFailed;
+    const event_fd: i32 = @intCast(@as(isize, @bitCast(event_r)));
+    defer fdpass.closeFd(event_fd);
+
+    var fd_queue = FdQueue{};
+    var ctrl_ctx = ControlThreadCtx{
+        .listen_fd = ctrl_fd,
+        .event_fd = event_fd,
+        .queue = &fd_queue,
+    };
+    const ctrl_thread = try std.Thread.spawn(.{}, controlThread, .{&ctrl_ctx});
+    ctrl_thread.detach();
+
     const c_alloc = std.heap.c_allocator;
     const workers = try c_alloc.alloc(Worker, num_workers);
     defer c_alloc.free(workers);
     for (workers) |*w| w.* = Worker{};
 
     if (num_workers == 1) {
-        try runIoUringLoop(&workers[0], &reader, server.socket.handle);
+        try runIoUringLoop(&workers[0], &reader, server.socket.handle, event_fd, &fd_queue);
         return;
     }
 
     const threads = try c_alloc.alloc(std.Thread, num_workers - 1);
     defer c_alloc.free(threads);
     for (threads, 1..) |*t, i| {
-        t.* = try std.Thread.spawn(.{}, runIoUringLoop, .{ &workers[i], &reader, server.socket.handle });
+        t.* = try std.Thread.spawn(.{}, runIoUringLoop, .{ &workers[i], &reader, server.socket.handle, event_fd, &fd_queue });
     }
-    runIoUringLoop(&workers[0], &reader, server.socket.handle) catch |err| {
+    runIoUringLoop(&workers[0], &reader, server.socket.handle, event_fd, &fd_queue) catch |err| {
         std.log.err("worker 0 failed: {}", .{err});
     };
     for (threads) |t| t.join();
@@ -145,8 +166,46 @@ fn parseRequest(buf: []const u8) struct { status: ParseStatus, req: ParsedReques
 const conn_pool_size: usize = 256;
 const ring_entries: u16 = 1024;
 const scratch_bytes: usize = 8 * 1024;
+const fd_queue_size: usize = conn_pool_size * 2;
 
-const Op = enum(u8) { accept = 1, read, write, close };
+const FdQueue = struct {
+    mutex: std.atomic.Mutex = .unlocked,
+    fds: [fd_queue_size]i32 = undefined,
+    len: usize = 0,
+
+    fn push(self: *FdQueue, fd: i32) bool {
+        self.lock();
+        defer self.mutex.unlock();
+        if (self.len == self.fds.len) return false;
+        self.fds[self.len] = fd;
+        self.len += 1;
+        return true;
+    }
+
+    fn pop(self: *FdQueue) ?i32 {
+        self.lock();
+        defer self.mutex.unlock();
+        if (self.len == 0) return null;
+        self.len -= 1;
+        return self.fds[self.len];
+    }
+
+    fn lock(self: *FdQueue) void {
+        while (!self.mutex.tryLock()) {
+            std.atomic.spinLoopHint();
+        }
+    }
+};
+
+const ControlThreadCtx = struct {
+    listen_fd: i32,
+    event_fd: i32,
+    queue: *FdQueue,
+};
+
+const Op = enum(u8) { accept = 1, notify, read, write, close };
+const accept_idx: u32 = std.math.maxInt(u32);
+const notify_idx: u32 = std.math.maxInt(u32) - 1;
 
 fn makeUserData(idx: u32, op: Op) u64 {
     const op_byte: u64 = @intFromEnum(op);
@@ -179,6 +238,7 @@ const Worker = struct {
     conns: [conn_pool_size]Conn = .{Conn{}} ** conn_pool_size,
     free_stack: [conn_pool_size]u32 = undefined,
     free_top: usize = 0,
+    event_buf: [8]u8 = undefined,
 
     pub fn init(self: *Worker) void {
         var i: u32 = conn_pool_size;
@@ -190,6 +250,23 @@ const Worker = struct {
         }
     }
 };
+
+fn controlThread(ctx: *ControlThreadCtx) void {
+    while (true) {
+        const accept_r = linux.accept4(ctx.listen_fd, null, null, linux.SOCK.CLOEXEC);
+        if (linux.errno(accept_r) != .SUCCESS) continue;
+        const conn_fd: i32 = @intCast(@as(isize, @bitCast(accept_r)));
+        defer fdpass.closeFd(conn_fd);
+
+        while (fdpass.recvFd(conn_fd)) |fd| {
+            if (ctx.queue.push(fd)) {
+                fdpass.notifyEvent(ctx.event_fd);
+            } else {
+                fdpass.closeFd(fd);
+            }
+        }
+    }
+}
 
 fn handleParsed(
     ring: *std.os.linux.IoUring,
@@ -262,21 +339,52 @@ test "parseWorkerCountArg preserves default and bounds tuning" {
     try std.testing.expectError(error.BadWorkerCount, parseWorkerCountArg("5"));
 }
 
+fn activateConn(ring: *linux.IoUring, worker: *Worker, new_fd: i32) !void {
+    if (worker.free_top == 0) {
+        _ = try ring.close(makeUserData(accept_idx, .close), new_fd);
+        return;
+    }
+
+    worker.free_top -= 1;
+    const slot = worker.free_stack[worker.free_top];
+    const c = &worker.conns[slot];
+    c.fd = new_fd;
+    c.buf_len = 0;
+    c.consumed_len = 0;
+    c.out_len = 0;
+    c.out_sent = 0;
+    c.close_after_write = false;
+    c.state = .reading;
+    _ = try ring.read(
+        makeUserData(slot, .read),
+        new_fd,
+        .{ .buffer = c.buf[0..] },
+        0,
+    );
+}
+
+fn drainPassedFds(ring: *linux.IoUring, worker: *Worker, fd_queue: *FdQueue) !void {
+    while (fd_queue.pop()) |fd| {
+        try activateConn(ring, worker, fd);
+    }
+}
+
 fn runIoUringLoop(
     worker: *Worker,
     reader: *const block_index.Reader,
     listen_fd: std.posix.fd_t,
+    event_fd: i32,
+    fd_queue: *FdQueue,
 ) !void {
     if (builtin.os.tag != .linux) return error.Unsupported;
-    const linux = std.os.linux;
 
     var ring = try linux.IoUring.init(ring_entries, 0);
     defer ring.deinit();
 
     worker.init();
 
-    const accept_idx: u32 = std.math.maxInt(u32);
     _ = try ring.accept(makeUserData(accept_idx, .accept), listen_fd, null, null, 0);
+    _ = try ring.read(makeUserData(notify_idx, .notify), event_fd, .{ .buffer = worker.event_buf[0..] }, 0);
 
     var cqes: [128]linux.io_uring_cqe = undefined;
 
@@ -298,30 +406,12 @@ fn runIoUringLoop(
                         _ = try ring.accept(makeUserData(accept_idx, .accept), listen_fd, null, null, 0);
                         continue;
                     }
-                    const new_fd: i32 = cqe.res;
-
-                    if (worker.free_top == 0) {
-                        _ = try ring.close(makeUserData(accept_idx, .close), new_fd);
-                        _ = try ring.accept(makeUserData(accept_idx, .accept), listen_fd, null, null, 0);
-                        continue;
-                    }
-                    worker.free_top -= 1;
-                    const slot = worker.free_stack[worker.free_top];
-                    const c = &worker.conns[slot];
-                    c.fd = new_fd;
-                    c.buf_len = 0;
-                    c.consumed_len = 0;
-                    c.out_len = 0;
-                    c.out_sent = 0;
-                    c.close_after_write = false;
-                    c.state = .reading;
-                    _ = try ring.read(
-                        makeUserData(slot, .read),
-                        new_fd,
-                        .{ .buffer = c.buf[0..] },
-                        0,
-                    );
+                    try activateConn(&ring, worker, cqe.res);
                     _ = try ring.accept(makeUserData(accept_idx, .accept), listen_fd, null, null, 0);
+                },
+                .notify => {
+                    try drainPassedFds(&ring, worker, fd_queue);
+                    _ = try ring.read(makeUserData(notify_idx, .notify), event_fd, .{ .buffer = worker.event_buf[0..] }, 0);
                 },
                 .read => {
                     const c = &worker.conns[ud.idx];

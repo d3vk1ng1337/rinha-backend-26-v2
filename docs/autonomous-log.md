@@ -108,3 +108,11 @@ Próximo passo: trocar LB Zig custom por nginx.
 - Compose local: builder conclui e gera índice q16 no volume. API/LB amd64 sob OrbStack/Mac arm64 abortam com `SystemOutdated` no `io_uring`; continua inválido para medir p99 local. Próximo checkpoint real é CI Linux + diagnóstico oficial k6 com imagens sha.
 - CI `build-and-publish` na branch `top1-q16` passou: índice q16 gerado em 3m46s, imagens `sha-47ddfaeca9c0de497563b3d917cc78555ad7a565` publicadas.
 - Diagnóstico Linux com k6 oficial e imagens pinadas: **p99 0.67ms, FP=0, FN=0, HTTP errors=0, weighted_E=0, final_score=6000**. Próximo passo: atualizar `submission` e abrir issue oficial.
+
+## Iteração 9 — comparação com top1
+
+- 2026-05-11 20:29Z: #3403 fechado. q16/block-layout oficial teve **p99 1.70ms**, FP=0/FN=0, HTTP errors=0, score **5769.14**. Qualidade está resolvida; gap para top1 é p99.
+- 2026-05-11 20:29Z: confirmado no issue oficial do Jairo: `rinha-2026-rust` + `SoNoForevis` fez **p99 1.05ms**, FP=0/FN=0, score **5976.81**.
+- Diferença arquitetural principal: o LB dele não proxy bytes HTTP/UDS; ele aceita TCP e passa o file descriptor para uma API via `SCM_RIGHTS`. Isso remove duas cópias e quatro operações read/write do caminho crítico por request.
+- Experimento de índice copiado do padrão dele (`fast_nprobe` baixo + fallback só nos 24/32/48/64 clusters mais próximos) foi descartado para o nosso índice q16: `prod_fast12_bbox_all` mantém **FP=0/FN=0**, mas `fast12_full64` ainda deixa FP=1. O fallback por bbox continua necessário.
+- H17 preparado em branch experimental: LB Zig convertido para FD-passing; API mantém o listener UDS antigo e adiciona `api.sock.ctrl` para receber FDs. Build/test local e build Linux/musl passam; próximo critério é CI k6 oficial antes de mexer na `submission`.

@@ -40,14 +40,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(builder);
 
+    const lb_module = b.createModule(.{
+        .root_source_file = b.path("cmd/lb/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    lb_module.addAnonymousImport("fdpass", .{
+        .root_source_file = b.path("src/fdpass.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const lb = b.addExecutable(.{
         .name = "lb",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("cmd/lb/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
+        .root_module = lb_module,
     });
     b.installArtifact(lb);
 

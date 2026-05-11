@@ -9,3 +9,4 @@ pub const quant = @import("quant.zig");
 pub const kmeans = @import("kmeans.zig");
 pub const fast_parser = @import("fast_parser.zig");
 pub const block_index = @import("block_index.zig");
+pub const fdpass = @import("fdpass.zig");
