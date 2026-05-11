@@ -29,6 +29,10 @@ Mas failure_rate ainda 90% > 15% cap → score travado em -6000.
 
 Próximo passo: trocar LB Zig custom por nginx.
 
+## Iteração 2 (modo autônomo)
+
+- 2026-05-11 10:12Z: submission branch atualizada para nginx:1.27-alpine como LB (commit 682080f). Issue #3236 disparada. Fila vazia, deve processar rápido.
+
 ## Fases preparadas em standby
 
 - H7: nginx LB (deploy/nginx.conf + deploy/docker-compose.nginx.yml committed)
