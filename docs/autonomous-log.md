@@ -67,11 +67,14 @@ Próximo passo: trocar LB Zig custom por nginx.
 
 ## Próxima hipótese pronta — H14
 
-- Só executar após #3318 fechar, ou se decidirmos abandonar explicitamente H13.
-- Trocar o submission Zig V2 para HAProxy TCP + warmup, mas mantendo as APIs Zig com `1` worker.
-- Resources planejados: api1/api2 `0.39 CPU / 145MB`, lb `0.18 CPU / 30MB`, warmup `0.04 CPU / 12MB` = `1.00 CPU / 332MB`.
-- Risco: H11/H12 já pioraram com HAProxy quando as APIs tinham múltiplos workers; H14 isola o fator workers e remove o LB Zig como variável.
-- Critério de sucesso: HTTP errors < 15% e p99 < 2s; se ainda ficar acima de 90% fail, priorizar experimento H15 com servidor Zig bloqueante/simplificado em vez de continuar mexendo em ANN.
+- 2026-05-11 16:00Z: #3318 fechado. **p99 2001.82ms, 48.300 HTTP errors, 89.74% fail, -6000** — H13 não apareceu no resultado oficial.
+- Diagnóstico remoto em GitHub Actions com as mesmas imagens `latest` publicadas:
+  - Node keep-alive, 54.100 payloads oficiais, 250 conexões: **54.100 HTTP 200**, p99 ~100ms.
+  - k6 oficial (`test/test.js`, 120s ramping-arrival-rate): **0 HTTP errors**, p99 **0.41ms**, final score local **3355.25**.
+  - Containers no diagnóstico tinham `NanoCpus` correto (api 0.40/0.40, lb 0.20) e mem limits corretos.
+- Hipótese raiz atual: uso de `:latest` permitiu cache/stale image no runner oficial. O resultado oficial reporta o commit `submission`, mas não reporta digest de imagem. Como a compose apontava `latest`, o runner pode ter executado imagem antiga apesar do compose novo.
+- **H14 executado**: branch `submission` atualizado para usar tags imutáveis `sha-c086938da1bff1d1ac160f91a06c3ce4d544c1e8` em API e LB. Issue #3340 aberta.
+- Critério de sucesso #3340: sair do padrão ~5k valid / ~48k HTTP errors. Se #3340 continuar igual, a hipótese de cache cai e o próximo passo volta para arquitetura HTTP sob runner oficial.
 
 ## Fases preparadas em standby
 
