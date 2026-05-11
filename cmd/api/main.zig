@@ -64,8 +64,7 @@ pub fn main(init: std.process.Init) !void {
         return error.Unsupported;
     }
 
-    const num_workers_env = std.posix.getenv("API_WORKERS");
-    const num_workers: usize = if (num_workers_env) |s| std.fmt.parseInt(usize, s, 10) catch 3 else 3;
+    const num_workers: usize = 3;
     std.log.info("api: io_uring loop, {} workers", .{num_workers});
 
     const c_alloc = std.heap.c_allocator;
