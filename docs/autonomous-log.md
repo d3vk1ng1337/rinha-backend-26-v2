@@ -55,11 +55,23 @@ Próximo passo: trocar LB Zig custom por nginx.
 
 - 2026-05-11 13:01Z: #3283 fechado. **977 valid, 98.05% fail, -6000** — REGRESSÃO. HAProxy+warmup piorou vs baseline Zig LB.
 - 2026-05-11 13:10Z: **H12**: mmap populate=true → populate=false. Hipótese: pre-fault síncrono de 46MB atrasava listen do unix socket, HAProxy/warmup hammeravam antes da API ficar pronta. Issue #3299 disparada (commit d20535b).
+- 2026-05-11 14:40Z: #3299 fechado. **~1635 respostas válidas, 94.5% fail, -6000** — `populate=false` isolado não resolveu. Ainda HAProxy+warmup, mesmas APIs com múltiplos workers.
 
 ## Iteração 6 — estabilização HTTP antes de ANN
 
 - 2026-05-11 14:29Z: **H13 preparado**: voltar para Zig LB, corrigir partial writes no proxy TCP, permitir tuning de workers da API e testar `1` worker por API. Hipótese: a taxa de HTTP errors vem de combinação de oversubscription (`3` workers competindo por 0.40 CPU) + proxy sem tratamento de writes parciais. Compose H13: api1/api2 `0.40 CPU / 160MB`, lb `0.20 CPU / 30MB`, total `1.00 CPU / 350MB`, comandos API com terceiro argumento `"1"`.
 - Local Docker no Mac arm64/OrbStack não serve como smoke de runtime para esta imagem linux/amd64: a API carrega o índice e falha em `io_uring` com `SystemOutdated`. Validação local fica restrita a build/test/compose; resultado oficial segue sendo a fonte de verdade.
+- Check offline do índice H13 publicado: `run-check .tmp/index-h13.bin 200 42` → busca média **19.2us**, approved agreement **98.5%** contra brute force int8. ANN não é o gargalo primário neste momento.
+- 2026-05-11 15:06Z: #3318 ainda aberta, fila oficial avançou só até #3309. Branch `submission` mantida congelada para não trocar o snapshot antes do runner processar H13.
+- Repo Go de referência (`/Users/samuel/Documents/Personal/rinha-backend-26`) confirmado como baseline operacional: HAProxy TCP + warmup + servidor Go bloqueante por conexão + `idx.Warmup()` antes de escutar. A versão #3303 marcou **5592.06** com 1 HTTP error; isso isola o problema Zig V2 em estabilidade HTTP/runtime, não no limite geral da competição.
+
+## Próxima hipótese pronta — H14
+
+- Só executar após #3318 fechar, ou se decidirmos abandonar explicitamente H13.
+- Trocar o submission Zig V2 para HAProxy TCP + warmup, mas mantendo as APIs Zig com `1` worker.
+- Resources planejados: api1/api2 `0.39 CPU / 145MB`, lb `0.18 CPU / 30MB`, warmup `0.04 CPU / 12MB` = `1.00 CPU / 332MB`.
+- Risco: H11/H12 já pioraram com HAProxy quando as APIs tinham múltiplos workers; H14 isola o fator workers e remove o LB Zig como variável.
+- Critério de sucesso: HTTP errors < 15% e p99 < 2s; se ainda ficar acima de 90% fail, priorizar experimento H15 com servidor Zig bloqueante/simplificado em vez de continuar mexendo em ANN.
 
 ## Fases preparadas em standby
 
