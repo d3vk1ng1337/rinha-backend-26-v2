@@ -6,6 +6,8 @@ total="${TOTAL_REQUESTS:-12000}"
 concurrency="${CONCURRENCY:-250}"
 timeout_ms="${REQUEST_TIMEOUT_MS:-2001}"
 test_data_url="${TEST_DATA_URL:-}"
+test_js_url="${TEST_JS_URL:-https://raw.githubusercontent.com/zanfranceschi/rinha-de-backend-2026/main/test/test.js}"
+run_k6="${RUN_K6:-0}"
 test_data_path=""
 
 echo "diagnose: compose=${compose_file} total=${total} concurrency=${concurrency} timeout_ms=${timeout_ms}"
@@ -38,6 +40,8 @@ done
 
 echo "diagnose: ps before load"
 docker compose -f "${compose_file}" ps
+docker compose -f "${compose_file}" ps -q \
+  | xargs docker inspect --format 'inspect {{.Name}} nanocpus={{.HostConfig.NanoCpus}} cpuquota={{.HostConfig.CpuQuota}} cpuperiod={{.HostConfig.CpuPeriod}} mem={{.HostConfig.Memory}}'
 docker stats --no-stream --format 'stats {{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} pids={{.PIDs}}'
 
 if [[ -n "${test_data_url}" ]]; then
@@ -60,11 +64,26 @@ mkdir -p .tmp
 stats_pid="$!"
 
 echo "diagnose: starting load"
-TOTAL_REQUESTS="${total}" \
-CONCURRENCY="${concurrency}" \
-REQUEST_TIMEOUT_MS="${timeout_ms}" \
-TEST_DATA_PATH="${test_data_path}" \
-node tools/diagnose-load.mjs
+if [[ "${run_k6}" == "1" ]]; then
+  if [[ -z "${test_data_path}" ]]; then
+    echo "diagnose: RUN_K6=1 requires TEST_DATA_URL" >&2
+    exit 1
+  fi
+  mkdir -p .tmp/k6/test
+  cp "${test_data_path}" .tmp/k6/test/test-data.json
+  curl -fsSL "${test_js_url}" -o .tmp/k6/test/test.js
+  docker run --rm --network host \
+    -v "${PWD}/.tmp/k6:/work" \
+    grafana/k6:latest run /work/test/test.js
+  echo "diagnose: k6 results"
+  cat .tmp/k6/test/results.json
+else
+  TOTAL_REQUESTS="${total}" \
+  CONCURRENCY="${concurrency}" \
+  REQUEST_TIMEOUT_MS="${timeout_ms}" \
+  TEST_DATA_PATH="${test_data_path}" \
+  node tools/diagnose-load.mjs
+fi
 
 kill "${stats_pid}" >/dev/null 2>&1 || true
 wait "${stats_pid}" >/dev/null 2>&1 || true
