@@ -46,6 +46,12 @@ Próximo passo: trocar LB Zig custom por nginx.
 - 2026-05-11 11:55Z: #3257 fechado. **589 valid, 98.93% fail, -6000** — REGRESSÃO drástica. bbox_repair adicionou trabalho por query (90% das queries triggeram).
 - 2026-05-11 12:00Z: Revertido — bbox_repair desabilitado (mantém v5 format por simplicidade). Commit 0984b83. Issue #3271 disparada para verificar baseline restaurado.
 
+## Iteração 5 — BREAKTHROUGH POTENCIAL
+
+- 2026-05-11 12:30Z: **DESCOBERTA CRÍTICA**: olhando resultados recentes da rinha, meu repo Go HNSW antigo (`steixeira93-go-hnsw`) scoreou **5818.9 pts HOJE** (top 4). Stack: HAProxy 2.9 + warmup container + Go HNSW API. **Mesma rig, mesmo dia, score 12000pts melhor que meu Zig V2 (-6000)**. Confirma que a rig NÃO está sobrecarregada — meu stack Zig V2 é que tem algo fundamentalmente errado.
+
+- 2026-05-11 12:35Z: **H11 (warmup + HAProxy)**: Adotada arquitetura comprovada do Go HNSW: HAProxy 2.9-alpine como LB + warmup container (96 requests, 12 payloads variados antes do k6 começar) + meu API Zig multi-thread io_uring. Resources: api 0.38/145MB × 2, lb 0.20/30MB, warmup 0.04/12MB = 1.00/332MB. Issue #3283 disparada (commit submission ab917c0).
+
 ## Fases preparadas em standby
 
 - H7: nginx LB (deploy/nginx.conf + deploy/docker-compose.nginx.yml committed)
