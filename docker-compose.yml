@@ -1,80 +1,57 @@
 services:
-  lb:
-    image: haproxy:2.9-alpine
-    ports:
-      - "9999:9999"
+  api1:
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:latest
+    command: ["/sockets/api1.sock", "/index/index.bin", "1"]
     volumes:
-      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - sockets:/sockets
-    depends_on:
-      - api1
-      - api2
+    security_opt:
+      - seccomp:unconfined
     ulimits:
       nofile:
         soft: 65535
         hard: 65535
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: "160MB"
+
+  api2:
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:latest
+    command: ["/sockets/api2.sock", "/index/index.bin", "1"]
+    volumes:
+      - sockets:/sockets
     security_opt:
       - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    deploy:
+      resources:
+        limits:
+          cpus: "0.40"
+          memory: "160MB"
+
+  lb:
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-lb:latest
+    command: ["0.0.0.0:9999", "/sockets/api1.sock", "/sockets/api2.sock"]
+    ports:
+      - "9999:9999"
+    volumes:
+      - sockets:/sockets:ro
+    depends_on: [api1, api2]
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     deploy:
       resources:
         limits:
           cpus: "0.20"
           memory: "30MB"
-
-  api1:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:latest
-    command: ["/sockets/api1.sock", "/index/index.bin"]
-    volumes:
-      - sockets:/sockets
-    security_opt:
-      - seccomp:unconfined
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
-    deploy:
-      resources:
-        limits:
-          cpus: "0.38"
-          memory: "145MB"
-
-  api2:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:latest
-    command: ["/sockets/api2.sock", "/index/index.bin"]
-    volumes:
-      - sockets:/sockets
-    depends_on:
-      - api1
-    security_opt:
-      - seccomp:unconfined
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
-    deploy:
-      resources:
-        limits:
-          cpus: "0.38"
-          memory: "145MB"
-
-  warmup:
-    image: curlimages/curl:8.10.1
-    entrypoint: ["/bin/sh", "/warmup.sh"]
-    environment:
-      - BASE_URL=http://lb:9999
-      - READY_RETRIES=240
-      - READY_SLEEP=0.25
-      - WARMUP_ROUNDS=96
-    volumes:
-      - ./scripts/warmup.sh:/warmup.sh:ro
-    depends_on:
-      - lb
-    deploy:
-      resources:
-        limits:
-          cpus: "0.04"
-          memory: "12MB"
-    restart: "no"
 
 volumes:
   sockets:
