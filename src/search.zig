@@ -71,7 +71,7 @@ pub fn search(
     var rer_idx: [k]u64 = .{0} ** k;
 
     for (top_idx[0..k_rerank]) |idx| {
-        const v = reader.vectorAt(idx);
+        const v = reader.vectorAt14(idx);
         var d: u32 = 0;
         comptime var j: usize = 0;
         inline while (j < 14) : (j += 1) {

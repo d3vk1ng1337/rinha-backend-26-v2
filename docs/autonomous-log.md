@@ -56,6 +56,11 @@ Próximo passo: trocar LB Zig custom por nginx.
 - 2026-05-11 13:01Z: #3283 fechado. **977 valid, 98.05% fail, -6000** — REGRESSÃO. HAProxy+warmup piorou vs baseline Zig LB.
 - 2026-05-11 13:10Z: **H12**: mmap populate=true → populate=false. Hipótese: pre-fault síncrono de 46MB atrasava listen do unix socket, HAProxy/warmup hammeravam antes da API ficar pronta. Issue #3299 disparada (commit d20535b).
 
+## Iteração 6 — estabilização HTTP antes de ANN
+
+- 2026-05-11 14:29Z: **H13 preparado**: voltar para Zig LB, corrigir partial writes no proxy TCP, permitir tuning de workers da API e testar `1` worker por API. Hipótese: a taxa de HTTP errors vem de combinação de oversubscription (`3` workers competindo por 0.40 CPU) + proxy sem tratamento de writes parciais. Compose H13: api1/api2 `0.40 CPU / 160MB`, lb `0.20 CPU / 30MB`, total `1.00 CPU / 350MB`, comandos API com terceiro argumento `"1"`.
+- Local Docker no Mac arm64/OrbStack não serve como smoke de runtime para esta imagem linux/amd64: a API carrega o índice e falha em `io_uring` com `SystemOutdated`. Validação local fica restrita a build/test/compose; resultado oficial segue sendo a fonte de verdade.
+
 ## Fases preparadas em standby
 
 - H7: nginx LB (deploy/nginx.conf + deploy/docker-compose.nginx.yml committed)

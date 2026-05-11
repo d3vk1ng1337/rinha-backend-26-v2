@@ -259,6 +259,11 @@ pub const Reader = struct {
         return self.vectors[start..][0..self.header.dim];
     }
 
+    pub inline fn vectorAt14(self: *const Reader, i: u64) *const [14]i8 {
+        const start: u64 = i * 14;
+        return self.vectors[start..][0..14];
+    }
+
     pub fn labelAt(self: *const Reader, i: u64) bool {
         return (self.labels[i / 8] >> @as(u3, @intCast(i % 8))) & 1 == 1;
     }
@@ -335,6 +340,9 @@ test "writer + reader v3 round-trip with single-cluster helper" {
     try testing.expectEqual(@as(i8, 14), r.vectorAt(0)[13]);
     try testing.expectEqual(@as(i8, -14), r.vectorAt(1)[13]);
     try testing.expectEqual(@as(i8, 100), r.vectorAt(2)[7]);
+    try testing.expectEqual(@as(i8, 14), r.vectorAt14(0)[13]);
+    try testing.expectEqual(@as(i8, -14), r.vectorAt14(1)[13]);
+    try testing.expectEqual(@as(i8, 100), r.vectorAt14(2)[7]);
 
     const offs = r.clusterOffsets();
     try testing.expectEqual(@as(u32, 0), offs[0]);

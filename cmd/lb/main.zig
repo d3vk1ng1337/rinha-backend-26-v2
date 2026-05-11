@@ -34,6 +34,10 @@ const Pair = struct {
     state: State = .dying,
     c2u_buf: [buf_size]u8 = undefined,
     u2c_buf: [buf_size]u8 = undefined,
+    c2u_len: usize = 0,
+    c2u_sent: usize = 0,
+    u2c_len: usize = 0,
+    u2c_sent: usize = 0,
     c_read_in: bool = false,
     u_read_in: bool = false,
     c_write_in: bool = false,
@@ -227,8 +231,9 @@ fn handleCqe(ring: *linux.IoUring, listen_fd: i32, cqe: linux.io_uring_cqe) !voi
                 try maybeRelease(ring, ud.idx);
                 return;
             }
-            const got: usize = @intCast(cqe.res);
-            try submitWriteUpstream(ring, ud.idx, got);
+            p.c2u_len = @intCast(cqe.res);
+            p.c2u_sent = 0;
+            try submitWriteUpstream(ring, ud.idx);
         },
         .read_u => {
             const p = &pairs[ud.idx];
@@ -242,8 +247,9 @@ fn handleCqe(ring: *linux.IoUring, listen_fd: i32, cqe: linux.io_uring_cqe) !voi
                 try maybeRelease(ring, ud.idx);
                 return;
             }
-            const got: usize = @intCast(cqe.res);
-            try submitWriteClient(ring, ud.idx, got);
+            p.u2c_len = @intCast(cqe.res);
+            p.u2c_sent = 0;
+            try submitWriteClient(ring, ud.idx);
         },
         .write_c => {
             const p = &pairs[ud.idx];
@@ -257,6 +263,12 @@ fn handleCqe(ring: *linux.IoUring, listen_fd: i32, cqe: linux.io_uring_cqe) !voi
                 try maybeRelease(ring, ud.idx);
                 return;
             }
+            if (!advancePendingWrite(&p.u2c_sent, p.u2c_len, @intCast(cqe.res))) {
+                try submitWriteClient(ring, ud.idx);
+                return;
+            }
+            p.u2c_len = 0;
+            p.u2c_sent = 0;
             try submitReadUpstream(ring, ud.idx);
         },
         .write_u => {
@@ -271,6 +283,12 @@ fn handleCqe(ring: *linux.IoUring, listen_fd: i32, cqe: linux.io_uring_cqe) !voi
                 try maybeRelease(ring, ud.idx);
                 return;
             }
+            if (!advancePendingWrite(&p.c2u_sent, p.c2u_len, @intCast(cqe.res))) {
+                try submitWriteUpstream(ring, ud.idx);
+                return;
+            }
+            p.c2u_len = 0;
+            p.c2u_sent = 0;
             try submitReadClient(ring, ud.idx);
         },
         .close_c => {
@@ -343,18 +361,35 @@ fn submitReadUpstream(ring: *linux.IoUring, idx: PairIdx) !void {
     _ = try ring.read(makeUd(idx, .read_u), p.upstream_fd, .{ .buffer = p.u2c_buf[0..] }, 0);
 }
 
-fn submitWriteUpstream(ring: *linux.IoUring, idx: PairIdx, len: usize) !void {
+fn submitWriteUpstream(ring: *linux.IoUring, idx: PairIdx) !void {
     const p = &pairs[idx];
     if (p.state != .forwarding) return;
+    if (p.u_write_in) return;
     p.u_write_in = true;
-    _ = try ring.write(makeUd(idx, .write_u), p.upstream_fd, p.c2u_buf[0..len], 0);
+    _ = try ring.write(makeUd(idx, .write_u), p.upstream_fd, p.c2u_buf[p.c2u_sent..p.c2u_len], 0);
 }
 
-fn submitWriteClient(ring: *linux.IoUring, idx: PairIdx, len: usize) !void {
+fn submitWriteClient(ring: *linux.IoUring, idx: PairIdx) !void {
     const p = &pairs[idx];
     if (p.state != .forwarding) return;
+    if (p.c_write_in) return;
     p.c_write_in = true;
-    _ = try ring.write(makeUd(idx, .write_c), p.client_fd, p.u2c_buf[0..len], 0);
+    _ = try ring.write(makeUd(idx, .write_c), p.client_fd, p.u2c_buf[p.u2c_sent..p.u2c_len], 0);
+}
+
+fn advancePendingWrite(sent: *usize, len: usize, wrote: usize) bool {
+    sent.* += wrote;
+    return sent.* >= len;
+}
+
+test "advancePendingWrite reports incomplete until all bytes are sent" {
+    var sent: usize = 0;
+    try std.testing.expectEqual(false, advancePendingWrite(&sent, 100, 40));
+    try std.testing.expectEqual(@as(usize, 40), sent);
+    try std.testing.expectEqual(false, advancePendingWrite(&sent, 100, 59));
+    try std.testing.expectEqual(@as(usize, 99), sent);
+    try std.testing.expectEqual(true, advancePendingWrite(&sent, 100, 1));
+    try std.testing.expectEqual(@as(usize, 100), sent);
 }
 
 fn killPair(ring: *linux.IoUring, idx: PairIdx) !void {

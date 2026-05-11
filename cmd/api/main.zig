@@ -25,6 +25,7 @@ pub fn main(init: std.process.Init) !void {
     _ = it.next();
     const sock_path = it.next() orelse "/sockets/api.sock";
     const index_path = it.next() orelse "/index/index.bin";
+    const num_workers = try parseWorkerCountArg(it.next());
     std.log.info("api: socket={s} index={s}", .{ sock_path, index_path });
 
     const cwd = std.Io.Dir.cwd();
@@ -64,7 +65,6 @@ pub fn main(init: std.process.Init) !void {
         return error.Unsupported;
     }
 
-    const num_workers: usize = 3;
     std.log.info("api: io_uring loop, {} workers", .{num_workers});
 
     const c_alloc = std.heap.c_allocator;
@@ -246,6 +246,20 @@ fn pickResponse(reader: *const index_format.Reader, c: *Conn, req: ParsedRequest
         },
         .not_found => resp_not_found_close,
     };
+}
+
+fn parseWorkerCountArg(arg: ?[]const u8) !usize {
+    const n = if (arg) |s| try std.fmt.parseInt(usize, s, 10) else 3;
+    if (n == 0 or n > 4) return error.BadWorkerCount;
+    return n;
+}
+
+test "parseWorkerCountArg preserves default and bounds tuning" {
+    try std.testing.expectEqual(@as(usize, 3), try parseWorkerCountArg(null));
+    try std.testing.expectEqual(@as(usize, 1), try parseWorkerCountArg("1"));
+    try std.testing.expectEqual(@as(usize, 4), try parseWorkerCountArg("4"));
+    try std.testing.expectError(error.BadWorkerCount, parseWorkerCountArg("0"));
+    try std.testing.expectError(error.BadWorkerCount, parseWorkerCountArg("5"));
 }
 
 fn runIoUringLoop(

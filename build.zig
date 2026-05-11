@@ -109,4 +109,32 @@ pub fn build(b: *std.Build) void {
         const run_t = b.addRunArtifact(t);
         test_step.dependOn(&run_t.step);
     }
+
+    const api_test_module = b.createModule(.{
+        .root_source_file = b.path("cmd/api/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    api_test_module.addAnonymousImport("lib", .{
+        .root_source_file = lib_path,
+        .target = target,
+        .optimize = optimize,
+    });
+    const api_test = b.addTest(.{
+        .root_module = api_test_module,
+    });
+    const run_api_test = b.addRunArtifact(api_test);
+    test_step.dependOn(&run_api_test.step);
+
+    const lb_test = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("cmd/lb/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    const run_lb_test = b.addRunArtifact(lb_test);
+    test_step.dependOn(&run_lb_test.step);
 }
