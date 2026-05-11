@@ -26,10 +26,14 @@ const variants = .{
     Variant{ .name = "exact_p128", .kind = .exact, .probes = 128, .rerank = 0 },
 };
 
+const extra_hist_count = 1;
+const borderline_bf_i8_hist = variants.len;
+
 const Hist = struct {
     fraud_by_count: [6]u64 = .{0} ** 6,
     legit_by_count: [6]u64 = .{0} ** 6,
     search_time_ns: i128 = 0,
+    fallback_count: u64 = 0,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -67,7 +71,7 @@ pub fn main(init: std.process.Init) !void {
     const data = try ally.alloc(u8, test_len);
     _ = try test_file.readPositionalAll(io, data, 0);
 
-    var hists: [variants.len]Hist = .{Hist{}} ** variants.len;
+    var hists: [variants.len + extra_hist_count]Hist = .{Hist{}} ** (variants.len + extra_hist_count);
     var parse_errors: u64 = 0;
     var entries: u64 = 0;
 
@@ -106,6 +110,20 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
+        const production_count = search.searchFraudCountExactClustersWith(32, &reader, &f, &q_int8);
+        const t0_bf = std.Io.Clock.Timestamp.now(io, .awake);
+        const bf_count = if (production_count == 2 or production_count == 3) blk: {
+            hists[borderline_bf_i8_hist].fallback_count += 1;
+            break :blk bruteForceInt8Count(&reader, &q_int8);
+        } else production_count;
+        const t1_bf = std.Io.Clock.Timestamp.now(io, .awake);
+        hists[borderline_bf_i8_hist].search_time_ns += t0_bf.durationTo(t1_bf).raw.nanoseconds;
+        if (expected_approved) {
+            hists[borderline_bf_i8_hist].legit_by_count[bf_count] += 1;
+        } else {
+            hists[borderline_bf_i8_hist].fraud_by_count[bf_count] += 1;
+        }
+
         entries += 1;
         pos = request_end;
     }
@@ -129,6 +147,48 @@ pub fn main(init: std.process.Init) !void {
 
         reportThresholds(hist, total_f);
     }
+
+    {
+        const hist = hists[borderline_bf_i8_hist];
+        const mean_us = @as(f64, @floatFromInt(@as(i64, @intCast(hist.search_time_ns)))) / total_f / 1000.0;
+        std.log.info("=== variant borderline_bf_i8 fallback_count={} mean_extra={d:.2}us ===", .{ hist.fallback_count, mean_us });
+        var c: usize = 0;
+        while (c <= 5) : (c += 1) {
+            std.log.info("count={} fraud={} legit={}", .{ c, hist.fraud_by_count[c], hist.legit_by_count[c] });
+        }
+        reportThresholds(hist, total_f);
+    }
+}
+
+fn bruteForceInt8Count(reader: *const index_format.Reader, q: *const [dim]i8) u8 {
+    var top_d: [5]u32 = .{std.math.maxInt(u32)} ** 5;
+    var top_i: [5]u64 = .{0} ** 5;
+    const n = reader.header.num_vectors;
+    var i: u64 = 0;
+    while (i < n) : (i += 1) {
+        const v = reader.vectorAt14(i);
+        var d: u32 = 0;
+        comptime var j: usize = 0;
+        inline while (j < dim) : (j += 1) {
+            const diff: i32 = @as(i32, q[j]) - @as(i32, v[j]);
+            d += @intCast(diff * diff);
+        }
+        if (d < top_d[4]) {
+            var pos: usize = 4;
+            while (pos > 0 and top_d[pos - 1] > d) : (pos -= 1) {
+                top_d[pos] = top_d[pos - 1];
+                top_i[pos] = top_i[pos - 1];
+            }
+            top_d[pos] = d;
+            top_i[pos] = i;
+        }
+    }
+
+    var count: u8 = 0;
+    for (top_i) |idx| {
+        if (reader.labelAt(idx)) count += 1;
+    }
+    return count;
 }
 
 fn reportThresholds(hist: Hist, total_f: f64) void {

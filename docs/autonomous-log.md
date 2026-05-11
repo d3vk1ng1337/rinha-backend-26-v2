@@ -89,6 +89,8 @@ Próximo passo: trocar LB Zig custom por nginx.
 - Confirmado nos docs oficiais: não podemos mudar o threshold para `count>=1`; a regra fixa é `fraud_score = fraudes/5` e `approved = fraud_score < 0.6`.
 - Hipótese validada: o erro vem da etapa binária de 14 bits antes do rerank. Trocar para IVF exact-scan int8 dentro dos clusters probados derruba o erro mantendo a regra oficial.
 - H15 implementado em `main`: `search()` agora usa `searchExactClustersWith(32)`. Eval no preview completo: FP=54, FN=60, weighted_E=234, failure_rate=0.211%, mean search ~46us. `run-check` 1000 queries: overlap médio 4.983/5, approval agreement 100%, mean search ~55us.
+- Resultado oficial H15: p99 **1.63ms**, FP=54, FN=60, HTTP errors=0, weighted_E=234, final_score **4439.08**. H15 confirmou a matriz offline, mas aumentou p99 de 1.19ms para 1.63ms.
+- Diagnóstico pós-H15: brute force `int8` global apenas nos casos borderline (`fraud_count ∈ {2,3}`, 1584/54100 requests) manteve FP=54/FN=60/weighted_E=234. Portanto os erros restantes não são recall de IVF; são perda de precisão da representação `int8` contra a regra oficial/float-like. Próximo caminho para top1 é `q16`/block-layout com fallback bbox, não aumentar probes.
 
 ## Fases preparadas em standby
 
