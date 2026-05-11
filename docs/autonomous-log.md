@@ -32,6 +32,11 @@ Próximo passo: trocar LB Zig custom por nginx.
 ## Iteração 2 (modo autônomo)
 
 - 2026-05-11 10:12Z: submission branch atualizada para nginx:1.27-alpine como LB (commit 682080f). Issue #3236 disparada. Fila vazia, deve processar rápido.
+- 2026-05-11 10:15Z: #3236 fechado. nginx LB **piorou**: 1208 valid (vs 5393 com Zig LB). Revertendo submission para Zig LB (commit 5181508).
+
+## Iteração 3
+
+- 2026-05-11 10:35Z: H10 implementado — hand-written JSON parser (src/fast_parser.zig). Position-based, zero alocação, navega objetos aninhados via auto-descend em `{`. Issue #3244 disparada. Recall preservado em testes locais. Search bench local: 19μs.
 
 ## Fases preparadas em standby
 
