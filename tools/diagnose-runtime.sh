@@ -72,7 +72,7 @@ if [[ "${run_k6}" == "1" ]]; then
   mkdir -p .tmp/k6/test
   cp "${test_data_path}" .tmp/k6/test/test-data.json
   curl -fsSL "${test_js_url}" -o .tmp/k6/test/test.js
-  docker run --rm --network host \
+  docker run --rm --network host -w /work \
     -v "${PWD}/.tmp/k6:/work" \
     grafana/k6:latest run /work/test/test.js
   echo "diagnose: k6 results"
