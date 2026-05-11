@@ -45,6 +45,7 @@ Próximo passo: trocar LB Zig custom por nginx.
 - 2026-05-11 11:30Z: H8 bbox_repair implementado — index v4→v5 com bbox_min/max [k*dim]i8 por cluster. Search adiciona pass de bbox_repair quando fraud_count ∈ [1,4]: testa clusters não probados via lower bound bbox sq distance. Approved agreement local 99%→100%. Issue #3257 disparada.
 - 2026-05-11 11:55Z: #3257 fechado. **589 valid, 98.93% fail, -6000** — REGRESSÃO drástica. bbox_repair adicionou trabalho por query (90% das queries triggeram).
 - 2026-05-11 12:00Z: Revertido — bbox_repair desabilitado (mantém v5 format por simplicidade). Commit 0984b83. Issue #3271 disparada para verificar baseline restaurado.
+- 2026-05-11 12:26Z: #3271 fechado. **5121 valid, 90.72% fail, -6000** — baseline restaurado para nível normal.
 
 ## Iteração 5 — BREAKTHROUGH POTENCIAL
 
