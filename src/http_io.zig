@@ -4,7 +4,6 @@ const vec = @import("vec.zig");
 const search = @import("search.zig");
 const fast_parser = @import("fast_parser.zig");
 const index_format = @import("index_format.zig");
-const quant = @import("quant.zig");
 
 pub const Response = struct {
     bytes: []const u8,
@@ -35,9 +34,8 @@ pub fn handle(
     try fast_parser.parseFeatures(body, &f);
     var q_int8: [vec.dim]i8 = undefined;
     index_format.quantize14(&f, &q_int8);
-    const q_bin = quant.quantizeBinary14(&f, reader.thresholds());
 
-    const count = search.searchFraudCount(reader, &f, q_bin, &q_int8);
+    const count = search.searchFraudCount(reader, &f, 0, &q_int8);
     return fraud_responses[count];
 }
 

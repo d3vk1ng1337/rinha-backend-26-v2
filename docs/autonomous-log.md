@@ -82,6 +82,14 @@ Próximo passo: trocar LB Zig custom por nginx.
 - Não existe forma de obter p99 "exato" em Mac ARM/OrbStack nem em GitHub Actions moderno. Eles reproduzem o script e a carga, mas não a mesma CPU/cache/kernel/host contention do Mac Mini oficial.
 - Adicionado `tools/run-official-preview.sh`: harness local que baixa os artefatos oficiais, exporta `docker-compose.yml` de `SUBMISSION_REF=submission`, sobe a compose, roda o k6 oficial e coleta Docker/cgroup/stats/logs. Para comparabilidade, rodar em Linux amd64; para equivalência máxima, rodar num Mac Mini Late 2014 com Ubuntu 24.04.
 
+## Iteração 7 — qualidade de detecção
+
+- 2026-05-11 17:05Z: #3340 fechado com **0 HTTP errors**, p99 **1.19ms**, score **3280.2**. Problema saiu de HTTP/runtime para detecção: FP=554, FN=592, weighted_E=2330.
+- Avaliador offline `cmd/eval` criado para rodar o `test-data.json` oficial contra o índice e varrer variantes. Baseline reproduz a matriz: `threshold oficial count>=3` → FP=554, FN=592, weighted_E=2330.
+- Confirmado nos docs oficiais: não podemos mudar o threshold para `count>=1`; a regra fixa é `fraud_score = fraudes/5` e `approved = fraud_score < 0.6`.
+- Hipótese validada: o erro vem da etapa binária de 14 bits antes do rerank. Trocar para IVF exact-scan int8 dentro dos clusters probados derruba o erro mantendo a regra oficial.
+- H15 implementado em `main`: `search()` agora usa `searchExactClustersWith(32)`. Eval no preview completo: FP=54, FN=60, weighted_E=234, failure_rate=0.211%, mean search ~46us. `run-check` 1000 queries: overlap médio 4.983/5, approval agreement 100%, mean search ~55us.
+
 ## Fases preparadas em standby
 
 - H7: nginx LB (deploy/nginx.conf + deploy/docker-compose.nginx.yml committed)

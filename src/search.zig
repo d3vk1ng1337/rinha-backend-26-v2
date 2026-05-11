@@ -5,6 +5,7 @@ const index_format = @import("index_format.zig");
 pub const k: usize = 5;
 pub const k_rerank: usize = 32;
 pub const num_probes: u32 = 8;
+pub const exact_num_probes: u32 = 32;
 pub const dim: usize = 14;
 
 const V8 = @Vector(8, f32);
@@ -16,6 +17,32 @@ pub fn searchFraudCount(
     q_int8: *const [dim]i8,
 ) u8 {
     const top = search(reader, q_f32, q_bin, q_int8);
+    return fraudCount(reader, top);
+}
+
+pub fn searchFraudCountWith(
+    comptime NumProbes: u32,
+    comptime KRerank: usize,
+    reader: *const index_format.Reader,
+    q_f32: *const [dim]f32,
+    q_bin: u16,
+    q_int8: *const [dim]i8,
+) u8 {
+    const top = searchWith(NumProbes, KRerank, reader, q_f32, q_bin, q_int8);
+    return fraudCount(reader, top);
+}
+
+pub fn searchFraudCountExactClustersWith(
+    comptime NumProbes: u32,
+    reader: *const index_format.Reader,
+    q_f32: *const [dim]f32,
+    q_int8: *const [dim]i8,
+) u8 {
+    const top = searchExactClustersWith(NumProbes, reader, q_f32, q_int8);
+    return fraudCount(reader, top);
+}
+
+pub fn fraudCount(reader: *const index_format.Reader, top: [k]u64) u8 {
     var c: u8 = 0;
     for (top) |i| if (reader.labelAt(i)) {
         c += 1;
@@ -29,18 +56,35 @@ pub fn search(
     q_bin: u16,
     q_int8: *const [dim]i8,
 ) [k]u64 {
-    var top_dist: [k_rerank]u32 = .{std.math.maxInt(u32)} ** k_rerank;
-    var top_idx: [k_rerank]u64 = .{0} ** k_rerank;
+    _ = q_bin;
+    return searchExactClustersWith(exact_num_probes, reader, q_f32, q_int8);
+}
+
+pub fn searchWith(
+    comptime NumProbes: u32,
+    comptime KRerank: usize,
+    reader: *const index_format.Reader,
+    q_f32: *const [dim]f32,
+    q_bin: u16,
+    q_int8: *const [dim]i8,
+) [k]u64 {
+    comptime {
+        std.debug.assert(NumProbes > 0);
+        std.debug.assert(KRerank >= k);
+    }
+
+    var top_dist: [KRerank]u32 = .{std.math.maxInt(u32)} ** KRerank;
+    var top_idx: [KRerank]u64 = .{0} ** KRerank;
 
     const centroids_soa = reader.centroids();
     const num_centroids: u32 = reader.header.num_centroids;
     const codes = reader.binaryCodes();
     const offsets = reader.clusterOffsets();
 
-    var probe_idx: [num_probes]u32 = .{std.math.maxInt(u32)} ** num_probes;
-    topNCentroidsSoA(q_f32, centroids_soa, num_centroids, num_probes, &probe_idx);
+    var probe_idx: [NumProbes]u32 = .{std.math.maxInt(u32)} ** NumProbes;
+    topNCentroidsSoA(q_f32, centroids_soa, num_centroids, NumProbes, &probe_idx);
 
-    var unique_probes: [num_probes]u32 = undefined;
+    var unique_probes: [NumProbes]u32 = undefined;
     var n_unique: u32 = 0;
     outer: for (probe_idx) |c| {
         if (c == std.math.maxInt(u32)) continue;
@@ -59,18 +103,18 @@ pub fn search(
         while (i + prefetch_ahead < end) : (i += 1) {
             @prefetch(&codes[i + prefetch_ahead], .{ .rw = .read, .locality = 0, .cache = .data });
             const d: u32 = @popCount(codes[i] ^ q_bin);
-            if (d < top_dist[k_rerank - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
+            if (d < top_dist[KRerank - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
         }
         while (i < end) : (i += 1) {
             const d: u32 = @popCount(codes[i] ^ q_bin);
-            if (d < top_dist[k_rerank - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
+            if (d < top_dist[KRerank - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
         }
     }
 
     var rer_dist: [k]u32 = .{std.math.maxInt(u32)} ** k;
     var rer_idx: [k]u64 = .{0} ** k;
 
-    for (top_idx[0..k_rerank]) |idx| {
+    for (top_idx[0..KRerank]) |idx| {
         const v = reader.vectorAt14(idx);
         var d: u32 = 0;
         comptime var j: usize = 0;
@@ -82,6 +126,66 @@ pub fn search(
     }
 
     return rer_idx;
+}
+
+pub fn searchExactClustersWith(
+    comptime NumProbes: u32,
+    reader: *const index_format.Reader,
+    q_f32: *const [dim]f32,
+    q_int8: *const [dim]i8,
+) [k]u64 {
+    comptime std.debug.assert(NumProbes > 0);
+
+    const centroids_soa = reader.centroids();
+    const num_centroids: u32 = reader.header.num_centroids;
+    const offsets = reader.clusterOffsets();
+
+    var probe_idx: [NumProbes]u32 = .{std.math.maxInt(u32)} ** NumProbes;
+    topNCentroidsSoA(q_f32, centroids_soa, num_centroids, NumProbes, &probe_idx);
+
+    var unique_probes: [NumProbes]u32 = undefined;
+    var n_unique: u32 = 0;
+    outer: for (probe_idx) |c| {
+        if (c == std.math.maxInt(u32)) continue;
+        for (unique_probes[0..n_unique]) |u| if (u == c) continue :outer;
+        unique_probes[n_unique] = c;
+        n_unique += 1;
+    }
+
+    var top_dist: [k]u32 = .{std.math.maxInt(u32)} ** k;
+    var top_idx: [k]u64 = .{0} ** k;
+    const prefetch_ahead: u64 = 32;
+
+    var p: u32 = 0;
+    while (p < n_unique) : (p += 1) {
+        const c = unique_probes[p];
+        const start: u64 = offsets[c];
+        const end: u64 = offsets[c + 1];
+        var i: u64 = start;
+        while (i + prefetch_ahead < end) : (i += 1) {
+            @prefetch(reader.vectorAt(i + prefetch_ahead).ptr, .{ .rw = .read, .locality = 0, .cache = .data });
+            const v = reader.vectorAt14(i);
+            const d = l2Int8(q_int8, v);
+            if (d < top_dist[k - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
+        }
+        while (i < end) : (i += 1) {
+            const v = reader.vectorAt14(i);
+            const d = l2Int8(q_int8, v);
+            if (d < top_dist[k - 1]) insertSorted(u32, top_dist[0..], top_idx[0..], d, i);
+        }
+    }
+
+    return top_idx;
+}
+
+inline fn l2Int8(q: *const [dim]i8, v: *const [dim]i8) u32 {
+    var d: u32 = 0;
+    comptime var j: usize = 0;
+    inline while (j < dim) : (j += 1) {
+        const diff: i32 = @as(i32, q[j]) - @as(i32, v[j]);
+        d += @intCast(diff * diff);
+    }
+    return d;
 }
 
 fn topNCentroidsSoA(

@@ -68,6 +68,23 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(check);
 
+    const eval_module = b.createModule(.{
+        .root_source_file = b.path("cmd/eval/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    eval_module.addAnonymousImport("lib", .{
+        .root_source_file = lib_path,
+        .target = target,
+        .optimize = optimize,
+    });
+    const eval = b.addExecutable(.{
+        .name = "eval",
+        .root_module = eval_module,
+    });
+    b.installArtifact(eval);
+
     const run_api = b.addRunArtifact(api);
     if (b.args) |args| run_api.addArgs(args);
     b.step("run-api", "Run the API binary").dependOn(&run_api.step);
@@ -83,6 +100,10 @@ pub fn build(b: *std.Build) void {
     const run_check = b.addRunArtifact(check);
     if (b.args) |args| run_check.addArgs(args);
     b.step("run-check", "Run the ground-truth check binary").dependOn(&run_check.step);
+
+    const run_eval = b.addRunArtifact(eval);
+    if (b.args) |args| run_eval.addArgs(args);
+    b.step("run-eval", "Run official test-data quality eval").dependOn(&run_eval.step);
 
     const test_step = b.step("test", "Run unit tests");
     const test_files = [_][]const u8{
