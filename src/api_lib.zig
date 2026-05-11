@@ -7,3 +7,4 @@ pub const json_io = @import("json_io.zig");
 pub const http_io = @import("http_io.zig");
 pub const quant = @import("quant.zig");
 pub const kmeans = @import("kmeans.zig");
+pub const fast_parser = @import("fast_parser.zig");

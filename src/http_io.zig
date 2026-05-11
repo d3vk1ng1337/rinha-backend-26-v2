@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const vec = @import("vec.zig");
 const search = @import("search.zig");
-const json_io = @import("json_io.zig");
+const fast_parser = @import("fast_parser.zig");
 const index_format = @import("index_format.zig");
 const quant = @import("quant.zig");
 
@@ -29,12 +29,11 @@ pub fn handle(
     reader: *const index_format.Reader,
     body: []const u8,
 ) ![]const u8 {
-    var p = try json_io.parsePayload(ally, body);
-    defer p.deinit();
+    _ = ally;
 
     var f: [vec.dim]f32 = undefined;
+    try fast_parser.parseFeatures(body, &f);
     var q_int8: [vec.dim]i8 = undefined;
-    vec.buildFloat(&p.value, &f);
     index_format.quantize14(&f, &q_int8);
     const q_bin = quant.quantizeBinary14(&f, reader.thresholds());
 
