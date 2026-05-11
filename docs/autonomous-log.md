@@ -53,6 +53,9 @@ Próximo passo: trocar LB Zig custom por nginx.
 
 - 2026-05-11 12:35Z: **H11 (warmup + HAProxy)**: Adotada arquitetura comprovada do Go HNSW: HAProxy 2.9-alpine como LB + warmup container (96 requests, 12 payloads variados antes do k6 começar) + meu API Zig multi-thread io_uring. Resources: api 0.38/145MB × 2, lb 0.20/30MB, warmup 0.04/12MB = 1.00/332MB. Issue #3283 disparada (commit submission ab917c0).
 
+- 2026-05-11 13:01Z: #3283 fechado. **977 valid, 98.05% fail, -6000** — REGRESSÃO. HAProxy+warmup piorou vs baseline Zig LB.
+- 2026-05-11 13:10Z: **H12**: mmap populate=true → populate=false. Hipótese: pre-fault síncrono de 46MB atrasava listen do unix socket, HAProxy/warmup hammeravam antes da API ficar pronta. Issue #3299 disparada (commit d20535b).
+
 ## Fases preparadas em standby
 
 - H7: nginx LB (deploy/nginx.conf + deploy/docker-compose.nginx.yml committed)
