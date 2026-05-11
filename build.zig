@@ -85,6 +85,23 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(eval);
 
+    const eval_block_module = b.createModule(.{
+        .root_source_file = b.path("cmd/eval_block/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    eval_block_module.addAnonymousImport("lib", .{
+        .root_source_file = lib_path,
+        .target = target,
+        .optimize = optimize,
+    });
+    const eval_block = b.addExecutable(.{
+        .name = "eval_block",
+        .root_module = eval_block_module,
+    });
+    b.installArtifact(eval_block);
+
     const run_api = b.addRunArtifact(api);
     if (b.args) |args| run_api.addArgs(args);
     b.step("run-api", "Run the API binary").dependOn(&run_api.step);
@@ -105,6 +122,10 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_eval.addArgs(args);
     b.step("run-eval", "Run official test-data quality eval").dependOn(&run_eval.step);
 
+    const run_eval_block = b.addRunArtifact(eval_block);
+    if (b.args) |args| run_eval_block.addArgs(args);
+    b.step("run-eval-block", "Run block-layout q16 quality eval").dependOn(&run_eval_block.step);
+
     const test_step = b.step("test", "Run unit tests");
     const test_files = [_][]const u8{
         "src/vec.zig",
@@ -117,6 +138,7 @@ pub fn build(b: *std.Build) void {
         "src/quant.zig",
         "src/kmeans.zig",
         "src/fast_parser.zig",
+        "src/block_index.zig",
     };
     for (test_files) |file| {
         const t = b.addTest(.{

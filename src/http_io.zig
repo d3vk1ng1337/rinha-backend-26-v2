@@ -4,6 +4,7 @@ const vec = @import("vec.zig");
 const search = @import("search.zig");
 const fast_parser = @import("fast_parser.zig");
 const index_format = @import("index_format.zig");
+const block_index = @import("block_index.zig");
 
 pub const Response = struct {
     bytes: []const u8,
@@ -36,6 +37,20 @@ pub fn handle(
     index_format.quantize14(&f, &q_int8);
 
     const count = search.searchFraudCount(reader, &f, 0, &q_int8);
+    return fraud_responses[count];
+}
+
+pub fn handleBlock(
+    ally: std.mem.Allocator,
+    reader: *const block_index.Reader,
+    body: []const u8,
+) ![]const u8 {
+    _ = ally;
+
+    var f: [block_index.dims]f32 = undefined;
+    try fast_parser.parseFeatures(body, &f);
+
+    const count = block_index.searchFraudCount(reader, &f, block_index.default_nprobe_fast);
     return fraud_responses[count];
 }
 

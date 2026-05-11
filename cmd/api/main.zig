@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const lib = @import("lib");
-const index_format = lib.index_format;
+const block_index = lib.block_index;
 const http_io = lib.http_io;
 
 pub const std_options: std.Options = .{
@@ -42,9 +42,9 @@ pub fn main(init: std.process.Init) !void {
     });
     defer mm.destroy(io);
 
-    const aligned: []align(@alignOf(index_format.Header)) const u8 = @alignCast(mm.memory);
-    const reader = try index_format.Reader.init(aligned);
-    std.log.info("api: index loaded — {} vectors, {} dims", .{ reader.header.num_vectors, reader.header.dim });
+    const aligned: []align(8) const u8 = @alignCast(mm.memory);
+    const reader = try block_index.Reader.init(aligned);
+    std.log.info("api: block index loaded — n={} k={} blocks={}", .{ reader.n, reader.k, reader.total_blocks });
 
     cwd.deleteFile(io, sock_path) catch |err| switch (err) {
         error.FileNotFound => {},
@@ -193,7 +193,7 @@ const Worker = struct {
 
 fn handleParsed(
     ring: *std.os.linux.IoUring,
-    reader: *const index_format.Reader,
+    reader: *const block_index.Reader,
     c: *Conn,
     idx: u32,
 ) !void {
@@ -235,13 +235,13 @@ fn handleParsed(
     }
 }
 
-fn pickResponse(reader: *const index_format.Reader, c: *Conn, req: ParsedRequest) []const u8 {
+fn pickResponse(reader: *const block_index.Reader, c: *Conn, req: ParsedRequest) []const u8 {
     return switch (req.endpoint) {
         .ready => resp_ready,
         .fraud_score => blk: {
             if (req.body.len > max_request_bytes) break :blk resp_too_large_close;
             var fba = std.heap.FixedBufferAllocator.init(c.scratch[0..]);
-            const resp = http_io.handle(fba.allocator(), reader, req.body) catch break :blk resp_internal_close;
+            const resp = http_io.handleBlock(fba.allocator(), reader, req.body) catch break :blk resp_internal_close;
             break :blk resp;
         },
         .not_found => resp_not_found_close,
@@ -264,7 +264,7 @@ test "parseWorkerCountArg preserves default and bounds tuning" {
 
 fn runIoUringLoop(
     worker: *Worker,
-    reader: *const index_format.Reader,
+    reader: *const block_index.Reader,
     listen_fd: std.posix.fd_t,
 ) !void {
     if (builtin.os.tag != .linux) return error.Unsupported;

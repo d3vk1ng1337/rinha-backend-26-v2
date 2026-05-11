@@ -2,8 +2,7 @@ const std = @import("std");
 const flate = std.compress.flate;
 const json = std.json;
 const lib = @import("lib");
-const index_format = lib.index_format;
-const quant = lib.quant;
+const block_index = lib.block_index;
 const kmeans = lib.kmeans;
 
 const dim: usize = 14;
@@ -31,23 +30,6 @@ pub fn main(init: std.process.Init) !void {
     try parseAll(ally, io, input, n, floats, label_bits);
     std.log.info("builder: parse complete", .{});
 
-    var per_dim: [dim][]f32 = undefined;
-    {
-        var d: usize = 0;
-        while (d < dim) : (d += 1) {
-            const slice = try ally.alloc(f32, n);
-            var i: u64 = 0;
-            while (i < n) : (i += 1) slice[i] = floats[i * dim + d];
-            per_dim[d] = slice;
-        }
-    }
-    const thresholds = try quant.computeThresholds(ally, &per_dim);
-    {
-        var d: usize = 0;
-        while (d < dim) : (d += 1) ally.free(per_dim[d]);
-    }
-    std.log.info("builder: thresholds computed", .{});
-
     const centroids_aos = try ally.alloc(f32, num_centroids * dim);
     const assignments = try ally.alloc(u32, n);
     std.log.info("builder: running k-means ({} centroids, {} iters)…", .{ num_centroids, kmeans_iters });
@@ -74,101 +56,100 @@ pub fn main(init: std.process.Init) !void {
         while (i < n) : (i += 1) cluster_counts[assignments[i]] += 1;
     }
 
-    const cluster_offsets = try ally.alloc(u32, num_centroids + 1);
+    const block_offsets = try ally.alloc(u32, num_centroids + 1);
+    var total_blocks: u32 = 0;
     {
-        var acc: u32 = 0;
         var c: usize = 0;
         while (c < num_centroids) : (c += 1) {
-            cluster_offsets[c] = acc;
-            acc += cluster_counts[c];
+            block_offsets[c] = total_blocks;
+            total_blocks += (cluster_counts[c] + @as(u32, @intCast(block_index.block_size)) - 1) / @as(u32, @intCast(block_index.block_size));
         }
-        cluster_offsets[num_centroids] = acc;
-        std.debug.assert(acc == n);
+        block_offsets[num_centroids] = total_blocks;
     }
 
-    const reordered_codes = try ally.alloc(u16, n);
-    const reordered_int8 = try ally.alloc(i8, n * dim);
-    const label_bytes = index_format.labelByteCount(n);
-    const reordered_labels = try ally.alloc(u8, label_bytes);
-    @memset(reordered_labels, 0);
+    const labels = try ally.alloc(u8, @as(usize, total_blocks) * block_index.block_size);
+    @memset(labels, 0);
+    const blocks = try ally.alloc(i16, @as(usize, total_blocks) * dim * block_index.block_size);
+    @memset(blocks, 0);
+    const bbox_min = try ally.alloc(i16, num_centroids * dim);
+    const bbox_max = try ally.alloc(i16, num_centroids * dim);
+    @memset(bbox_min, 0);
+    @memset(bbox_max, 0);
 
     {
-        const cursor = try ally.alloc(u32, num_centroids);
-        defer ally.free(cursor);
-        @memcpy(cursor, cluster_offsets[0..num_centroids]);
+        const cursor_slots = try ally.alloc(u32, num_centroids);
+        defer ally.free(cursor_slots);
+        const cluster_seen = try ally.alloc(u32, num_centroids);
+        defer ally.free(cluster_seen);
+        @memset(cluster_seen, 0);
+
+        var c: usize = 0;
+        while (c < num_centroids) : (c += 1) {
+            cursor_slots[c] = block_offsets[c] * @as(u32, @intCast(block_index.block_size));
+        }
 
         var i: u64 = 0;
         while (i < n) : (i += 1) {
-            const c = assignments[i];
-            const dst: u64 = cursor[c];
-            cursor[c] += 1;
+            const cluster: usize = @intCast(assignments[i]);
+            const dst_slot: usize = @intCast(cursor_slots[cluster]);
+            cursor_slots[cluster] += 1;
 
             const v_slice: *const [dim]f32 = floats[i * dim ..][0..dim];
-            reordered_codes[dst] = quant.quantizeBinary14(v_slice, &thresholds);
-
-            var q: [dim]i8 = undefined;
-            index_format.quantize14(v_slice, &q);
-            @memcpy(reordered_int8[dst * dim ..][0..dim], &q);
+            const block_id = dst_slot / block_index.block_size;
+            const slot = dst_slot % block_index.block_size;
 
             if (label_bits[i]) {
-                const dst_byte = dst / 8;
-                const dst_bit: u3 = @intCast(dst % 8);
-                reordered_labels[dst_byte] |= (@as(u8, 1) << dst_bit);
+                labels[block_id * block_index.block_size + slot] = 1;
             }
+
+            var d: usize = 0;
+            while (d < dim) : (d += 1) {
+                const q16 = quantize16(v_slice[d]);
+                blocks[block_id * dim * block_index.block_size + d * block_index.block_size + slot] = q16;
+
+                const bbox_idx = d * num_centroids + cluster;
+                if (cluster_seen[cluster] == 0) {
+                    bbox_min[bbox_idx] = q16;
+                    bbox_max[bbox_idx] = q16;
+                } else {
+                    if (q16 < bbox_min[bbox_idx]) bbox_min[bbox_idx] = q16;
+                    if (q16 > bbox_max[bbox_idx]) bbox_max[bbox_idx] = q16;
+                }
+            }
+            cluster_seen[cluster] += 1;
 
             if ((i + 1) % 200_000 == 0) std.log.info("builder: reordered {}", .{i + 1});
         }
     }
 
-    std.log.info("builder: reorder done, computing bbox per cluster", .{});
-
-    const bbox_min = try ally.alloc(i8, num_centroids * dim);
-    const bbox_max = try ally.alloc(i8, num_centroids * dim);
-    {
-        var c: usize = 0;
-        while (c < num_centroids) : (c += 1) {
-            const s: usize = cluster_offsets[c];
-            const e: usize = cluster_offsets[c + 1];
-            if (s == e) {
-                @memset(bbox_min[c * dim .. (c + 1) * dim], 0);
-                @memset(bbox_max[c * dim .. (c + 1) * dim], 0);
-                continue;
-            }
-            var d: usize = 0;
-            while (d < dim) : (d += 1) {
-                var mn: i8 = reordered_int8[s * dim + d];
-                var mx: i8 = mn;
-                var i: usize = s + 1;
-                while (i < e) : (i += 1) {
-                    const v = reordered_int8[i * dim + d];
-                    if (v < mn) mn = v;
-                    if (v > mx) mx = v;
-                }
-                bbox_min[c * dim + d] = mn;
-                bbox_max[c * dim + d] = mx;
-            }
-        }
-    }
-    std.log.info("builder: bbox computed, writing V5 index", .{});
+    std.log.info("builder: block layout done, writing q16 index", .{});
 
     const cwd = std.Io.Dir.cwd();
     const out_file = try cwd.createFile(io, output, .{ .read = true });
     defer out_file.close(io);
 
-    try index_format.writeAll(out_file, io, .{
+    try block_index.writeAll(out_file, io, .{
         .n = n,
-        .d = dim,
         .k = num_centroids,
-        .thresholds = &thresholds,
+        .total_blocks = @intCast(total_blocks),
         .centroids = centroids_soa,
-        .cluster_offsets = cluster_offsets,
+        .block_offsets = block_offsets,
         .bbox_min = bbox_min,
         .bbox_max = bbox_max,
-        .labels = reordered_labels,
-        .binary_codes = reordered_codes,
-        .int8_vectors = reordered_int8,
+        .labels = labels,
+        .blocks = blocks,
     });
     std.log.info("builder: done", .{});
+}
+
+fn quantize16(v_raw: f32) i16 {
+    var v = v_raw;
+    if (v < -1) v = -1;
+    if (v > 1) v = 1;
+    return if (v >= 0)
+        @intFromFloat(v * 10000.0 + 0.5)
+    else
+        @intFromFloat(v * 10000.0 - 0.5);
 }
 
 fn countRecords(ally: std.mem.Allocator, io: std.Io, path: []const u8) !u64 {

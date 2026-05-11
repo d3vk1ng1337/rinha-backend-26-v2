@@ -12,7 +12,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: "200M"
+          memory: "512M"
 
   api1:
     build:
@@ -22,15 +22,15 @@ services:
     volumes:
       - index:/index:ro
       - sockets:/sockets
-    command: ["/sockets/api1.sock", "/index/index.bin"]
+    command: ["/sockets/api1.sock", "/index/index.bin", "1"]
     depends_on:
       builder:
         condition: service_completed_successfully
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "100M"
+          cpus: "0.40"
+          memory: "160M"
 
   api2:
     build:
@@ -40,15 +40,15 @@ services:
     volumes:
       - index:/index:ro
       - sockets:/sockets
-    command: ["/sockets/api2.sock", "/index/index.bin"]
+    command: ["/sockets/api2.sock", "/index/index.bin", "1"]
     depends_on:
       builder:
         condition: service_completed_successfully
     deploy:
       resources:
         limits:
-          cpus: "0.45"
-          memory: "100M"
+          cpus: "0.40"
+          memory: "160M"
 
   lb:
     build:
@@ -66,8 +66,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.10"
-          memory: "20M"
+          cpus: "0.20"
+          memory: "30M"
 
 volumes:
   index:

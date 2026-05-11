@@ -97,3 +97,12 @@ Próximo passo: trocar LB Zig custom por nginx.
 - H7: nginx LB (deploy/nginx.conf + deploy/docker-compose.nginx.yml committed)
 - H8: bbox_repair no search (a implementar quando necessário)
 - H9: per-cluster SoA + i16 quant (a implementar quando necessário)
+
+## Iteração 8 — q16/block-layout para top1
+
+- 2026-05-11 18:10Z: implementado leitor q16/block-layout compatível com o índice Go (`RINHIVF2`): centroids f32 dim-major, bbox i16 dim-major, offsets por bloco de 8, labels byte por slot e vetores i16 dim-major.
+- Validação contra índice Go q16: `nprobe=8` ficou em FP=0/FN=1/weighted_E=3; `nprobe=24` zerou E. Raiz: fast tier pequeno ainda podia deixar um caso fraud como count=1 antes do fallback.
+- Builder Zig passou a gerar o índice q16 nativamente. Validação em `.tmp/index-q16.bin`: `nprobe=8` → weighted_E=4; `nprobe=11+` → **weighted_E=0**. Default fixado em `nprobe=12` por margem contra diferença de build x86/arm.
+- Hot path do scan de bloco trocado para `@Vector(8, f32)` com checkpoints 4/6/8 dims, mantendo semântica float32 contra q16 decodificado. Mean offline no preview completo para `nprobe=12`: **~39us → ~27us**, mantendo FP=0/FN=0.
+- `zig build test -Doptimize=ReleaseFast`, `zig build -Doptimize=ReleaseFast` e `zig build -Dtarget=x86_64-linux-musl -Dcpu=haswell` passaram.
+- Compose local: builder conclui e gera índice q16 no volume. API/LB amd64 sob OrbStack/Mac arm64 abortam com `SystemOutdated` no `io_uring`; continua inválido para medir p99 local. Próximo checkpoint real é CI Linux + diagnóstico oficial k6 com imagens sha.
