@@ -120,7 +120,36 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    std.log.info("builder: reorder done, writing V3 index", .{});
+    std.log.info("builder: reorder done, computing bbox per cluster", .{});
+
+    const bbox_min = try ally.alloc(i8, num_centroids * dim);
+    const bbox_max = try ally.alloc(i8, num_centroids * dim);
+    {
+        var c: usize = 0;
+        while (c < num_centroids) : (c += 1) {
+            const s: usize = cluster_offsets[c];
+            const e: usize = cluster_offsets[c + 1];
+            if (s == e) {
+                @memset(bbox_min[c * dim .. (c + 1) * dim], 0);
+                @memset(bbox_max[c * dim .. (c + 1) * dim], 0);
+                continue;
+            }
+            var d: usize = 0;
+            while (d < dim) : (d += 1) {
+                var mn: i8 = reordered_int8[s * dim + d];
+                var mx: i8 = mn;
+                var i: usize = s + 1;
+                while (i < e) : (i += 1) {
+                    const v = reordered_int8[i * dim + d];
+                    if (v < mn) mn = v;
+                    if (v > mx) mx = v;
+                }
+                bbox_min[c * dim + d] = mn;
+                bbox_max[c * dim + d] = mx;
+            }
+        }
+    }
+    std.log.info("builder: bbox computed, writing V5 index", .{});
 
     const cwd = std.Io.Dir.cwd();
     const out_file = try cwd.createFile(io, output, .{ .read = true });
@@ -133,6 +162,8 @@ pub fn main(init: std.process.Init) !void {
         .thresholds = &thresholds,
         .centroids = centroids_soa,
         .cluster_offsets = cluster_offsets,
+        .bbox_min = bbox_min,
+        .bbox_max = bbox_max,
         .labels = reordered_labels,
         .binary_codes = reordered_codes,
         .int8_vectors = reordered_int8,

@@ -3,7 +3,7 @@ const testing = std.testing;
 const Io = std.Io;
 
 pub const magic: u64 = 0x52494E48413236;
-pub const version_v4: u32 = 4;
+pub const version_v5: u32 = 5;
 
 pub const Header = extern struct {
     magic: u64,
@@ -23,6 +23,10 @@ pub fn clusterOffsetsByteCount(k: u64) u64 {
     return (k + 1) * @sizeOf(u32);
 }
 
+pub fn bboxByteCount(k: u64, d: u64) u64 {
+    return k * d * @sizeOf(i8);
+}
+
 pub fn labelByteCount(n: u64) u64 {
     const raw = (n + 7) / 8;
     return (raw + 1) & ~@as(u64, 1);
@@ -37,7 +41,7 @@ pub fn vectorByteCount(n: u64, d: u64) u64 {
 }
 
 pub fn fileSize(n: u64, d: u64, k: u64) u64 {
-    return @sizeOf(Header) + thresholds_byte_count + centroidsByteCount(k, d) + clusterOffsetsByteCount(k) + labelByteCount(n) + binaryCodeByteCount(n) + vectorByteCount(n, d);
+    return @sizeOf(Header) + thresholds_byte_count + centroidsByteCount(k, d) + clusterOffsetsByteCount(k) + 2 * bboxByteCount(k, d) + labelByteCount(n) + binaryCodeByteCount(n) + vectorByteCount(n, d);
 }
 
 pub const quant_scale: f32 = 127.0;
@@ -62,6 +66,8 @@ pub const WriteParams = struct {
     thresholds: *const [14]f32,
     centroids: []const f32,
     cluster_offsets: []const u32,
+    bbox_min: []const i8,
+    bbox_max: []const i8,
     labels: []const u8,
     binary_codes: []const u16,
     int8_vectors: []const i8,
@@ -91,6 +97,8 @@ pub fn writeTestSingleCluster(
 
     const centroid = [_]f32{0.0} ** 14;
     const cluster_offsets = [_]u32{ 0, @intCast(n) };
+    const bbox_min_z = [_]i8{0} ** 14;
+    const bbox_max_z = [_]i8{0} ** 14;
     try writeAll(file, io, .{
         .n = n,
         .d = d,
@@ -98,6 +106,8 @@ pub fn writeTestSingleCluster(
         .thresholds = &thresholds,
         .centroids = &centroid,
         .cluster_offsets = &cluster_offsets,
+        .bbox_min = &bbox_min_z,
+        .bbox_max = &bbox_max_z,
         .labels = labels_bytes,
         .binary_codes = binary_codes,
         .int8_vectors = int8_vectors,
@@ -107,6 +117,8 @@ pub fn writeTestSingleCluster(
 pub fn writeAll(file: std.Io.File, io: Io, p: WriteParams) !void {
     std.debug.assert(p.centroids.len == p.k * p.d);
     std.debug.assert(p.cluster_offsets.len == p.k + 1);
+    std.debug.assert(p.bbox_min.len == p.k * p.d);
+    std.debug.assert(p.bbox_max.len == p.k * p.d);
     std.debug.assert(p.labels.len == labelByteCount(p.n));
     std.debug.assert(p.binary_codes.len == p.n);
     std.debug.assert(p.int8_vectors.len == p.n * p.d);
@@ -116,7 +128,7 @@ pub fn writeAll(file: std.Io.File, io: Io, p: WriteParams) !void {
         .magic = magic,
         .num_vectors = p.n,
         .dim = p.d,
-        .version = version_v4,
+        .version = version_v5,
         .num_centroids = @intCast(p.k),
     };
 
@@ -129,6 +141,10 @@ pub fn writeAll(file: std.Io.File, io: Io, p: WriteParams) !void {
     off += centroidsByteCount(p.k, p.d);
     try file.writePositionalAll(io, std.mem.sliceAsBytes(p.cluster_offsets), off);
     off += clusterOffsetsByteCount(p.k);
+    try file.writePositionalAll(io, std.mem.sliceAsBytes(p.bbox_min), off);
+    off += bboxByteCount(p.k, p.d);
+    try file.writePositionalAll(io, std.mem.sliceAsBytes(p.bbox_max), off);
+    off += bboxByteCount(p.k, p.d);
     try file.writePositionalAll(io, p.labels, off);
     off += labelByteCount(p.n);
     try file.writePositionalAll(io, std.mem.sliceAsBytes(p.binary_codes), off);
@@ -143,6 +159,8 @@ pub const Reader = struct {
     header: Header,
     centroids_slice: []align(4) const f32,
     cluster_offsets_slice: []align(4) const u32,
+    bbox_min_slice: []const i8,
+    bbox_max_slice: []const i8,
     labels: []const u8,
     binary_codes: []align(2) const u16,
     vectors: []const i8,
@@ -151,15 +169,16 @@ pub const Reader = struct {
         if (bytes.len < @sizeOf(Header)) return error.TooShort;
         const h = std.mem.bytesToValue(Header, bytes[0..@sizeOf(Header)]);
         if (h.magic != magic) return error.BadMagic;
-        if (h.version != version_v4) return error.UnsupportedVersion;
+        if (h.version != version_v5) return error.UnsupportedVersion;
 
         const k: u64 = h.num_centroids;
         const cb = centroidsByteCount(k, h.dim);
         const ob = clusterOffsetsByteCount(k);
+        const bx = bboxByteCount(k, h.dim);
         const lb = labelByteCount(h.num_vectors);
         const bb = binaryCodeByteCount(h.num_vectors);
         const vb = vectorByteCount(h.num_vectors, h.dim);
-        const total_expected = @sizeOf(Header) + thresholds_byte_count + cb + ob + lb + bb + vb;
+        const total_expected = @sizeOf(Header) + thresholds_byte_count + cb + ob + 2 * bx + lb + bb + vb;
         if (bytes.len < total_expected) return error.TooShort;
 
         const cent_start = @sizeOf(Header) + thresholds_byte_count;
@@ -172,7 +191,15 @@ pub const Reader = struct {
         const off_bytes: []align(4) const u8 = @alignCast(bytes[off_start..off_end]);
         const cluster_offsets_slice = std.mem.bytesAsSlice(u32, off_bytes);
 
-        const labels_start = off_end;
+        const bmin_start = off_end;
+        const bmin_end = bmin_start + bx;
+        const bbox_min_slice = std.mem.bytesAsSlice(i8, bytes[bmin_start..bmin_end]);
+
+        const bmax_start = bmin_end;
+        const bmax_end = bmax_start + bx;
+        const bbox_max_slice = std.mem.bytesAsSlice(i8, bytes[bmax_start..bmax_end]);
+
+        const labels_start = bmax_end;
         const labels = bytes[labels_start .. labels_start + lb];
 
         const bin_start = labels_start + lb;
@@ -188,6 +215,8 @@ pub const Reader = struct {
             .header = h,
             .centroids_slice = centroids_slice,
             .cluster_offsets_slice = cluster_offsets_slice,
+            .bbox_min_slice = bbox_min_slice,
+            .bbox_max_slice = bbox_max_slice,
             .labels = labels,
             .binary_codes = binary_codes,
             .vectors = vectors,
@@ -207,6 +236,14 @@ pub const Reader = struct {
 
     pub fn clusterOffsets(self: *const Reader) []align(4) const u32 {
         return self.cluster_offsets_slice;
+    }
+
+    pub fn bboxMin(self: *const Reader) []const i8 {
+        return self.bbox_min_slice;
+    }
+
+    pub fn bboxMax(self: *const Reader) []const i8 {
+        return self.bbox_max_slice;
     }
 
     pub fn binaryCodeAt(self: *const Reader, i: u64) u16 {
@@ -236,11 +273,11 @@ test "labelByteCount handles non-multiples of 8 and pads to even" {
     try testing.expectEqual(@as(u64, 375000), labelByteCount(3_000_000));
 }
 
-test "fileSize includes centroids and offsets for v3" {
+test "fileSize includes bbox for v5" {
     const n: u64 = 3_000_000;
     const d: u64 = 14;
     const k: u64 = 4096;
-    const expected = @sizeOf(Header) + thresholds_byte_count + centroidsByteCount(k, d) + clusterOffsetsByteCount(k) + labelByteCount(n) + binaryCodeByteCount(n) + vectorByteCount(n, d);
+    const expected = @sizeOf(Header) + thresholds_byte_count + centroidsByteCount(k, d) + clusterOffsetsByteCount(k) + 2 * bboxByteCount(k, d) + labelByteCount(n) + binaryCodeByteCount(n) + vectorByteCount(n, d);
     try testing.expectEqual(expected, fileSize(n, d, k));
     try testing.expect(expected < 100 * 1024 * 1024);
 }
@@ -280,7 +317,7 @@ test "writer + reader v3 round-trip with single-cluster helper" {
 
     const r = try Reader.init(buf);
     try testing.expectEqual(@as(u64, 3), r.header.num_vectors);
-    try testing.expectEqual(@as(u32, version_v4), r.header.version);
+    try testing.expectEqual(@as(u32, version_v5), r.header.version);
     try testing.expectEqual(@as(u64, 14), r.header.dim);
     try testing.expectEqual(@as(u32, 1), r.header.num_centroids);
 
