@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const std_options: std.Options = .{
+    .log_level = .err,
+};
+
 const linux = if (builtin.os.tag == .linux) std.os.linux else struct {};
 
 const buf_size: usize = 4 * 1024;

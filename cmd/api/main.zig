@@ -4,6 +4,10 @@ const lib = @import("lib");
 const index_format = lib.index_format;
 const http_io = lib.http_io;
 
+pub const std_options: std.Options = .{
+    .log_level = .err,
+};
+
 const max_request_bytes: usize = 4 * 1024;
 
 const resp_bad_req_close: []const u8 = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -55,13 +59,34 @@ pub fn main(init: std.process.Init) !void {
 
     std.log.info("api: listening on {s}", .{sock_path});
 
-    if (builtin.os.tag == .linux) {
-        std.log.info("api: io_uring loop", .{});
-        try runIoUringLoop(&reader, server.socket.handle);
-    } else {
+    if (builtin.os.tag != .linux) {
         std.log.info("api: blocking loop unsupported on this build", .{});
         return error.Unsupported;
     }
+
+    const num_workers_env = std.posix.getenv("API_WORKERS");
+    const num_workers: usize = if (num_workers_env) |s| std.fmt.parseInt(usize, s, 10) catch 3 else 3;
+    std.log.info("api: io_uring loop, {} workers", .{num_workers});
+
+    const c_alloc = std.heap.c_allocator;
+    const workers = try c_alloc.alloc(Worker, num_workers);
+    defer c_alloc.free(workers);
+    for (workers) |*w| w.* = Worker{};
+
+    if (num_workers == 1) {
+        try runIoUringLoop(&workers[0], &reader, server.socket.handle);
+        return;
+    }
+
+    const threads = try c_alloc.alloc(std.Thread, num_workers - 1);
+    defer c_alloc.free(threads);
+    for (threads, 1..) |*t, i| {
+        t.* = try std.Thread.spawn(.{}, runIoUringLoop, .{ &workers[i], &reader, server.socket.handle });
+    }
+    runIoUringLoop(&workers[0], &reader, server.socket.handle) catch |err| {
+        std.log.err("worker 0 failed: {}", .{err});
+    };
+    for (threads) |t| t.join();
 }
 
 const ParseStatus = enum { incomplete, ok, bad };
@@ -151,9 +176,21 @@ const Conn = struct {
     const State = enum { idle, reading, writing, closing };
 };
 
-var conns_storage: [conn_pool_size]Conn = .{Conn{}} ** conn_pool_size;
-var free_stack: [conn_pool_size]u32 = undefined;
-var free_top: usize = 0;
+const Worker = struct {
+    conns: [conn_pool_size]Conn = .{Conn{}} ** conn_pool_size,
+    free_stack: [conn_pool_size]u32 = undefined,
+    free_top: usize = 0,
+
+    pub fn init(self: *Worker) void {
+        var i: u32 = conn_pool_size;
+        self.free_top = 0;
+        while (i > 0) {
+            i -= 1;
+            self.free_stack[self.free_top] = i;
+            self.free_top += 1;
+        }
+    }
+};
 
 fn handleParsed(
     ring: *std.os.linux.IoUring,
@@ -213,6 +250,7 @@ fn pickResponse(reader: *const index_format.Reader, c: *Conn, req: ParsedRequest
 }
 
 fn runIoUringLoop(
+    worker: *Worker,
     reader: *const index_format.Reader,
     listen_fd: std.posix.fd_t,
 ) !void {
@@ -222,14 +260,7 @@ fn runIoUringLoop(
     var ring = try linux.IoUring.init(ring_entries, 0);
     defer ring.deinit();
 
-    {
-        var i: u32 = conn_pool_size;
-        while (i > 0) {
-            i -= 1;
-            free_stack[free_top] = i;
-            free_top += 1;
-        }
-    }
+    worker.init();
 
     const accept_idx: u32 = std.math.maxInt(u32);
     _ = try ring.accept(makeUserData(accept_idx, .accept), listen_fd, null, null, 0);
@@ -256,14 +287,14 @@ fn runIoUringLoop(
                     }
                     const new_fd: i32 = cqe.res;
 
-                    if (free_top == 0) {
+                    if (worker.free_top == 0) {
                         _ = try ring.close(makeUserData(accept_idx, .close), new_fd);
                         _ = try ring.accept(makeUserData(accept_idx, .accept), listen_fd, null, null, 0);
                         continue;
                     }
-                    free_top -= 1;
-                    const slot = free_stack[free_top];
-                    const c = &conns_storage[slot];
+                    worker.free_top -= 1;
+                    const slot = worker.free_stack[worker.free_top];
+                    const c = &worker.conns[slot];
                     c.fd = new_fd;
                     c.buf_len = 0;
                     c.consumed_len = 0;
@@ -280,7 +311,7 @@ fn runIoUringLoop(
                     _ = try ring.accept(makeUserData(accept_idx, .accept), listen_fd, null, null, 0);
                 },
                 .read => {
-                    const c = &conns_storage[ud.idx];
+                    const c = &worker.conns[ud.idx];
                     if (cqe.res <= 0) {
                         c.state = .closing;
                         _ = try ring.close(makeUserData(ud.idx, .close), c.fd);
@@ -291,7 +322,7 @@ fn runIoUringLoop(
                     try handleParsed(&ring, reader, c, ud.idx);
                 },
                 .write => {
-                    const c = &conns_storage[ud.idx];
+                    const c = &worker.conns[ud.idx];
                     if (cqe.res <= 0) {
                         c.state = .closing;
                         _ = try ring.close(makeUserData(ud.idx, .close), c.fd);
@@ -335,11 +366,11 @@ fn runIoUringLoop(
                 },
                 .close => {
                     if (ud.idx == accept_idx) continue;
-                    const c = &conns_storage[ud.idx];
+                    const c = &worker.conns[ud.idx];
                     c.fd = -1;
                     c.state = .idle;
-                    free_stack[free_top] = ud.idx;
-                    free_top += 1;
+                    worker.free_stack[worker.free_top] = ud.idx;
+                    worker.free_top += 1;
                 },
             }
         }
