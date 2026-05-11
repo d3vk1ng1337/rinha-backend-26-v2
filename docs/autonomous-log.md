@@ -76,6 +76,12 @@ Próximo passo: trocar LB Zig custom por nginx.
 - **H14 executado**: branch `submission` atualizado para usar tags imutáveis `sha-c086938da1bff1d1ac160f91a06c3ce4d544c1e8` em API e LB. Issue #3340 aberta.
 - Critério de sucesso #3340: sair do padrão ~5k valid / ~48k HTTP errors. Se #3340 continuar igual, a hipótese de cache cai e o próximo passo volta para arquitetura HTTP sob runner oficial.
 
+## Simulação do ambiente oficial
+
+- 2026-05-11 16:35Z: confirmado nos docs oficiais: o preview público usa `run.sh` + `test/test.js` + `test/test-data.json`; o limite declarado é 1 CPU / 350MB; o runner oficial é Mac Mini Late 2014, 2.6GHz, 8GB, Ubuntu 24.04.
+- Não existe forma de obter p99 "exato" em Mac ARM/OrbStack nem em GitHub Actions moderno. Eles reproduzem o script e a carga, mas não a mesma CPU/cache/kernel/host contention do Mac Mini oficial.
+- Adicionado `tools/run-official-preview.sh`: harness local que baixa os artefatos oficiais, exporta `docker-compose.yml` de `SUBMISSION_REF=submission`, sobe a compose, roda o k6 oficial e coleta Docker/cgroup/stats/logs. Para comparabilidade, rodar em Linux amd64; para equivalência máxima, rodar num Mac Mini Late 2014 com Ubuntu 24.04.
+
 ## Fases preparadas em standby
 
 - H7: nginx LB (deploy/nginx.conf + deploy/docker-compose.nginx.yml committed)

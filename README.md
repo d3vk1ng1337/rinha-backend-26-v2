@@ -23,3 +23,15 @@ curl http://localhost:9999/ready
 make smoke      # testa /fraud-score com payload de exemplo
 make down
 ```
+
+## Prévia oficial local
+
+Para reproduzir o script público da Rinha com a massa oficial de prévia:
+
+```sh
+SUBMISSION_REF=submission bash tools/run-official-preview.sh
+```
+
+Esse comando exporta o `docker-compose.yml` da branch `submission`, baixa `config.json`, `run.sh`, `test/test.js` e `test/test-data.json` do repositório oficial, sobe a stack via Docker Compose, espera `/ready` com os mesmos limites de retry do `config.json`, executa o k6 e salva evidências em `.tmp/official-preview/`.
+
+Comparabilidade real exige Linux `amd64`. O runner oficial é um Mac Mini Late 2014 com Ubuntu 24.04; Docker em Mac ARM/OrbStack serve apenas como smoke test, não como proxy de p99.
