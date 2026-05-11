@@ -6,12 +6,29 @@ const json_io = @import("json_io.zig");
 const index_format = @import("index_format.zig");
 const quant = @import("quant.zig");
 
+pub const Response = struct {
+    bytes: []const u8,
+    approved: bool,
+};
+
+const resp_0 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"approved\":true,\"fraud_score\":0}";
+const resp_1 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 35\r\n\r\n{\"approved\":true,\"fraud_score\":0.2}";
+const resp_2 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 35\r\n\r\n{\"approved\":true,\"fraud_score\":0.4}";
+const resp_3 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 36\r\n\r\n{\"approved\":false,\"fraud_score\":0.6}";
+const resp_4 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 36\r\n\r\n{\"approved\":false,\"fraud_score\":0.8}";
+const resp_5 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 34\r\n\r\n{\"approved\":false,\"fraud_score\":1}";
+
+const fraud_responses = [_][]const u8{ resp_0, resp_1, resp_2, resp_3, resp_4, resp_5 };
+
+pub fn responseForCount(count: u8) []const u8 {
+    return fraud_responses[count];
+}
+
 pub fn handle(
     ally: std.mem.Allocator,
     reader: *const index_format.Reader,
     body: []const u8,
-    out: []u8,
-) ![]u8 {
+) ![]const u8 {
     var p = try json_io.parsePayload(ally, body);
     defer p.deinit();
 
@@ -21,10 +38,8 @@ pub fn handle(
     index_format.quantize14(&f, &q_int8);
     const q_bin = quant.quantizeBinary14(&f, reader.thresholds());
 
-    const top = search.search(reader, &f, q_bin, &q_int8);
-    const fs = search.fraudScore(reader, top);
-    const approved = fs < 0.6;
-    return json_io.encodeResponse(out, .{ .approved = approved, .fraud_score = fs });
+    const count = search.searchFraudCount(reader, &f, q_bin, &q_int8);
+    return fraud_responses[count];
 }
 
 test "handle returns approved=true response when no frauds among top-5" {
@@ -33,6 +48,7 @@ test "handle returns approved=true response when no frauds among top-5" {
     defer tmp.cleanup();
     const f = try tmp.dir.createFile(io, "idx.bin", .{ .read = true });
     defer f.close(io);
+
     const labels = [_]bool{false} ** 10;
     var codes: [10]u16 = undefined;
     var int8: [10 * 14]i8 = undefined;
@@ -57,8 +73,7 @@ test "handle returns approved=true response when no frauds among top-5" {
         \\"terminal":{"is_online":true,"card_present":true,"km_from_home":0},
         \\"last_transaction":null}
     ;
-    var out_buf: [256]u8 = undefined;
-    const out = try handle(testing.allocator, &r, body, &out_buf);
+    const out = try handle(testing.allocator, &r, body);
     try testing.expect(std.mem.indexOf(u8, out, "\"approved\":true") != null);
     try testing.expect(std.mem.indexOf(u8, out, "\"fraud_score\":0") != null);
 }

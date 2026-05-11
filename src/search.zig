@@ -9,6 +9,20 @@ pub const dim: usize = 14;
 
 const V8 = @Vector(8, f32);
 
+pub fn searchFraudCount(
+    reader: *const index_format.Reader,
+    q_f32: *const [dim]f32,
+    q_bin: u16,
+    q_int8: *const [dim]i8,
+) u8 {
+    const top = search(reader, q_f32, q_bin, q_int8);
+    var c: u8 = 0;
+    for (top) |i| if (reader.labelAt(i)) {
+        c += 1;
+    };
+    return c;
+}
+
 pub fn search(
     reader: *const index_format.Reader,
     q_f32: *const [dim]f32,
