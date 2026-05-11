@@ -37,6 +37,12 @@ Próximo passo: trocar LB Zig custom por nginx.
 ## Iteração 3
 
 - 2026-05-11 10:35Z: H10 implementado — hand-written JSON parser (src/fast_parser.zig). Position-based, zero alocação, navega objetos aninhados via auto-descend em `{`. Issue #3244 disparada. Recall preservado em testes locais. Search bench local: 19μs.
+- 2026-05-11 10:50Z: #3244 fechado. 5335 valid, 90.36% fail, -6000. JSON parser não melhorou (dentro da variance).
+- 2026-05-11 10:55Z: Re-submeti mesma versão (#3248) para medir variance. 2417 valid, 95.6% fail. **Variance enorme do rig: 5335 → 2417 com MESMO código**.
+
+## Iteração 4
+
+- 2026-05-11 11:30Z: H8 bbox_repair implementado — index v4→v5 com bbox_min/max [k*dim]i8 por cluster. Search adiciona pass de bbox_repair quando fraud_count ∈ [1,4]: testa clusters não probados via lower bound bbox sq distance. Approved agreement local 99%→100%. Issue #3257 disparada.
 
 ## Fases preparadas em standby
 
