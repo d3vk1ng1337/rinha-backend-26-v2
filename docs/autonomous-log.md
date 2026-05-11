@@ -106,3 +106,5 @@ Próximo passo: trocar LB Zig custom por nginx.
 - Hot path do scan de bloco trocado para `@Vector(8, f32)` com checkpoints 4/6/8 dims, mantendo semântica float32 contra q16 decodificado. Mean offline no preview completo para `nprobe=12`: **~39us → ~27us**, mantendo FP=0/FN=0.
 - `zig build test -Doptimize=ReleaseFast`, `zig build -Doptimize=ReleaseFast` e `zig build -Dtarget=x86_64-linux-musl -Dcpu=haswell` passaram.
 - Compose local: builder conclui e gera índice q16 no volume. API/LB amd64 sob OrbStack/Mac arm64 abortam com `SystemOutdated` no `io_uring`; continua inválido para medir p99 local. Próximo checkpoint real é CI Linux + diagnóstico oficial k6 com imagens sha.
+- CI `build-and-publish` na branch `top1-q16` passou: índice q16 gerado em 3m46s, imagens `sha-47ddfaeca9c0de497563b3d917cc78555ad7a565` publicadas.
+- Diagnóstico Linux com k6 oficial e imagens pinadas: **p99 0.67ms, FP=0, FN=0, HTTP errors=0, weighted_E=0, final_score=6000**. Próximo passo: atualizar `submission` e abrir issue oficial.
