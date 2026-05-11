@@ -1,12 +1,12 @@
 import http from 'node:http';
+import fs from 'node:fs';
 import { performance } from 'node:perf_hooks';
 
-const total = parseInt(process.env.TOTAL_REQUESTS ?? '12000', 10);
 const concurrency = parseInt(process.env.CONCURRENCY ?? '250', 10);
 const timeoutMs = parseInt(process.env.REQUEST_TIMEOUT_MS ?? '2001', 10);
 const url = new URL(process.env.TARGET_URL ?? 'http://127.0.0.1:9999/fraud-score');
 
-const payload = Buffer.from(JSON.stringify({
+const syntheticPayload = {
   id: 'diag-01',
   transaction: {
     amount: 384.88,
@@ -32,7 +32,17 @@ const payload = Buffer.from(JSON.stringify({
     timestamp: '2026-03-11T05:58:35Z',
     km_from_current: 18.86,
   },
-}));
+};
+
+const entries = process.env.TEST_DATA_PATH
+  ? JSON.parse(fs.readFileSync(process.env.TEST_DATA_PATH, 'utf8')).entries
+  : null;
+const total = parseInt(process.env.TOTAL_REQUESTS ?? String(entries?.length ?? 12000), 10);
+
+function payloadAt(index) {
+  if (!entries) return Buffer.from(JSON.stringify(syntheticPayload));
+  return Buffer.from(JSON.stringify(entries[index % entries.length].request));
+}
 
 const agent = new http.Agent({
   keepAlive: true,
@@ -57,8 +67,10 @@ function percentile(values, p) {
 }
 
 function runOne() {
+  const requestIndex = launched;
   launched += 1;
   const started = performance.now();
+  const payload = payloadAt(requestIndex);
 
   const req = http.request({
     agent,

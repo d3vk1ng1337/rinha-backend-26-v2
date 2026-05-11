@@ -5,6 +5,8 @@ compose_file="${COMPOSE_FILE:-deploy/docker-compose.submission.yml}"
 total="${TOTAL_REQUESTS:-12000}"
 concurrency="${CONCURRENCY:-250}"
 timeout_ms="${REQUEST_TIMEOUT_MS:-2001}"
+test_data_url="${TEST_DATA_URL:-}"
+test_data_path=""
 
 echo "diagnose: compose=${compose_file} total=${total} concurrency=${concurrency} timeout_ms=${timeout_ms}"
 
@@ -38,6 +40,14 @@ echo "diagnose: ps before load"
 docker compose -f "${compose_file}" ps
 docker stats --no-stream --format 'stats {{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} pids={{.PIDs}}'
 
+if [[ -n "${test_data_url}" ]]; then
+  mkdir -p .tmp
+  test_data_path=".tmp/test-data.json"
+  echo "diagnose: downloading official test data"
+  curl -fsSL "${test_data_url}" -o "${test_data_path}"
+  ls -lh "${test_data_path}"
+fi
+
 stats_log=".tmp/diagnose-stats.log"
 mkdir -p .tmp
 (
@@ -53,6 +63,7 @@ echo "diagnose: starting load"
 TOTAL_REQUESTS="${total}" \
 CONCURRENCY="${concurrency}" \
 REQUEST_TIMEOUT_MS="${timeout_ms}" \
+TEST_DATA_PATH="${test_data_path}" \
 node tools/diagnose-load.mjs
 
 kill "${stats_pid}" >/dev/null 2>&1 || true

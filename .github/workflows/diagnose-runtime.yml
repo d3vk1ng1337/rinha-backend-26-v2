@@ -11,6 +11,10 @@ on:
         description: Concurrent keep-alive clients
         required: false
         default: "250"
+      test_data_url:
+        description: Optional rinha test-data.json URL
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -33,4 +37,5 @@ jobs:
           TOTAL_REQUESTS: ${{ inputs.total_requests }}
           CONCURRENCY: ${{ inputs.concurrency }}
           REQUEST_TIMEOUT_MS: "2001"
+          TEST_DATA_URL: ${{ inputs.test_data_url }}
         run: bash tools/diagnose-runtime.sh
