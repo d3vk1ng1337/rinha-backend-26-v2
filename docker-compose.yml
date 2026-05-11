@@ -34,15 +34,14 @@ services:
           memory: "160M"
 
   lb:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-lb:latest
-    command: ["0.0.0.0:9999", "/sockets/api1.sock", "/sockets/api2.sock"]
+    image: nginx:1.27-alpine
+    command: ["nginx", "-c", "/etc/nginx/nginx.conf", "-g", "daemon off;"]
     volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - sockets:/sockets:ro
     ports:
       - "9999:9999"
     depends_on: [api1, api2]
-    security_opt:
-      - seccomp:unconfined
     ulimits:
       nofile:
         soft: 65535
