@@ -81,51 +81,6 @@ pub fn search(
         if (d < rer_dist[k - 1]) insertSorted(u32, rer_dist[0..], rer_idx[0..], d, idx);
     }
 
-    var fraud_count: u32 = 0;
-    for (rer_idx) |i| if (reader.labelAt(i)) {
-        fraud_count += 1;
-    };
-
-    if (fraud_count >= 1 and fraud_count <= 4) {
-        const bbox_min = reader.bboxMin();
-        const bbox_max = reader.bboxMax();
-        var c2: u32 = 0;
-        while (c2 < num_centroids) : (c2 += 1) {
-            var already_probed = false;
-            for (unique_probes[0..n_unique]) |u| if (u == c2) {
-                already_probed = true;
-                break;
-            };
-            if (already_probed) continue;
-
-            const base = @as(usize, c2) * dim;
-            var lower_bound: u32 = 0;
-            comptime var dd: usize = 0;
-            inline while (dd < 14) : (dd += 1) {
-                const lo: i32 = bbox_min[base + dd];
-                const hi: i32 = bbox_max[base + dd];
-                const qv: i32 = q_int8[dd];
-                const delta: i32 = if (qv < lo) lo - qv else if (qv > hi) qv - hi else 0;
-                lower_bound += @intCast(delta * delta);
-            }
-            if (lower_bound >= rer_dist[k - 1]) continue;
-
-            const s2: u64 = offsets[c2];
-            const e2: u64 = offsets[c2 + 1];
-            var ii: u64 = s2;
-            while (ii < e2) : (ii += 1) {
-                const v_slice = reader.vectorAt(ii);
-                var d_full: u32 = 0;
-                comptime var jj: usize = 0;
-                inline while (jj < 14) : (jj += 1) {
-                    const diff: i32 = @as(i32, q_int8[jj]) - @as(i32, v_slice[jj]);
-                    d_full += @intCast(diff * diff);
-                }
-                if (d_full < rer_dist[k - 1]) insertSorted(u32, rer_dist[0..], rer_idx[0..], d_full, ii);
-            }
-        }
-    }
-
     return rer_idx;
 }
 
