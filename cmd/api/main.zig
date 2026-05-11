@@ -36,7 +36,7 @@ pub fn main(init: std.process.Init) !void {
         .len = @intCast(total),
         .protection = .{ .read = true },
         .undefined_contents = false,
-        .populate = true,
+        .populate = false,
         .offset = 0,
     });
     defer mm.destroy(io);
