@@ -1,0 +1,36 @@
+name: diagnose-runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      total_requests:
+        description: Total requests for the diagnostic load
+        required: false
+        default: "12000"
+      concurrency:
+        description: Concurrent keep-alive clients
+        required: false
+        default: "250"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Diagnose published runtime
+        env:
+          TOTAL_REQUESTS: ${{ inputs.total_requests }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          REQUEST_TIMEOUT_MS: "2001"
+        run: bash tools/diagnose-runtime.sh
