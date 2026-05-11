@@ -3,9 +3,9 @@ const builtin = @import("builtin");
 
 const linux = if (builtin.os.tag == .linux) std.os.linux else struct {};
 
-const buf_size: usize = 16 * 1024;
-const pool_size: usize = 256;
-const ring_entries: u16 = 1024;
+const buf_size: usize = 4 * 1024;
+const pool_size: usize = 512;
+const ring_entries: u16 = 2048;
 
 const Op = enum(u8) {
     accept = 1,
