@@ -274,7 +274,7 @@ fn handleParsed(
     reader: *const block_index.Reader,
     c: *Conn,
     idx: u32,
-) !void {
+) anyerror!void {
     const parsed = parseRequest(c.buf[0..c.buf_len]);
     switch (parsed.status) {
         .incomplete => {
@@ -284,8 +284,7 @@ fn handleParsed(
                 c.out_sent = 0;
                 c.consumed_len = c.buf_len;
                 c.close_after_write = true;
-                c.state = .writing;
-                _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
+                try startWrite(ring, reader, c, idx);
             } else {
                 c.state = .reading;
                 _ = try ring.read(makeUserData(idx, .read), c.fd, .{ .buffer = c.buf[c.buf_len..] }, 0);
@@ -297,8 +296,7 @@ fn handleParsed(
             c.out_sent = 0;
             c.consumed_len = c.buf_len;
             c.close_after_write = true;
-            c.state = .writing;
-            _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
+            try startWrite(ring, reader, c, idx);
         },
         .ok => {
             const resp = pickResponse(reader, c, parsed.req);
@@ -307,8 +305,7 @@ fn handleParsed(
             c.out_sent = 0;
             c.consumed_len = parsed.req.total_len;
             c.close_after_write = (parsed.req.endpoint == .not_found);
-            c.state = .writing;
-            _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
+            try startWrite(ring, reader, c, idx);
         },
     }
 }
@@ -324,6 +321,81 @@ fn pickResponse(reader: *const block_index.Reader, c: *Conn, req: ParsedRequest)
         },
         .not_found => resp_not_found_close,
     };
+}
+
+fn startWrite(
+    ring: *std.os.linux.IoUring,
+    reader: *const block_index.Reader,
+    c: *Conn,
+    idx: u32,
+) anyerror!void {
+    c.state = .writing;
+
+    const rc = linux.sendto(
+        c.fd,
+        c.out_ptr,
+        c.out_len,
+        linux.MSG.DONTWAIT | linux.MSG.NOSIGNAL,
+        null,
+        0,
+    );
+
+    switch (linux.errno(rc)) {
+        .SUCCESS => {
+            const sent: usize = @intCast(rc);
+            c.out_sent = sent;
+            if (sent >= c.out_len) {
+                try finishWrite(ring, reader, c, idx);
+                return;
+            }
+            _ = try ring.write(
+                makeUserData(idx, .write),
+                c.fd,
+                c.out_ptr[c.out_sent..c.out_len],
+                0,
+            );
+        },
+        .AGAIN, .INTR => {
+            c.out_sent = 0;
+            _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
+        },
+        else => {
+            c.state = .closing;
+            _ = try ring.close(makeUserData(idx, .close), c.fd);
+        },
+    }
+}
+
+fn finishWrite(
+    ring: *std.os.linux.IoUring,
+    reader: *const block_index.Reader,
+    c: *Conn,
+    idx: u32,
+) anyerror!void {
+    if (c.close_after_write) {
+        c.state = .closing;
+        _ = try ring.close(makeUserData(idx, .close), c.fd);
+        return;
+    }
+    const leftover = c.buf_len - c.consumed_len;
+    if (leftover > 0) {
+        std.mem.copyForwards(u8, c.buf[0..leftover], c.buf[c.consumed_len..c.buf_len]);
+    }
+    c.buf_len = leftover;
+    c.consumed_len = 0;
+    c.out_len = 0;
+    c.out_sent = 0;
+    if (leftover > 0) {
+        try handleParsed(ring, reader, c, idx);
+    } else {
+        c.state = .reading;
+        _ = try ring.read(
+            makeUserData(idx, .read),
+            c.fd,
+            .{ .buffer = c.buf[0..] },
+            0,
+        );
+    }
 }
 
 fn warmBlockIndex(reader: *const block_index.Reader) void {
@@ -474,30 +546,7 @@ fn runIoUringLoop(
                         );
                         continue;
                     }
-                    if (c.close_after_write) {
-                        c.state = .closing;
-                        _ = try ring.close(makeUserData(ud.idx, .close), c.fd);
-                        continue;
-                    }
-                    const leftover = c.buf_len - c.consumed_len;
-                    if (leftover > 0) {
-                        std.mem.copyForwards(u8, c.buf[0..leftover], c.buf[c.consumed_len..c.buf_len]);
-                    }
-                    c.buf_len = leftover;
-                    c.consumed_len = 0;
-                    c.out_len = 0;
-                    c.out_sent = 0;
-                    if (leftover > 0) {
-                        try handleParsed(&ring, reader, c, ud.idx);
-                    } else {
-                        c.state = .reading;
-                        _ = try ring.read(
-                            makeUserData(ud.idx, .read),
-                            c.fd,
-                            .{ .buffer = c.buf[0..] },
-                            0,
-                        );
-                    }
+                    try finishWrite(&ring, reader, c, ud.idx);
                 },
                 .close => {
                     if (ud.idx == accept_idx) continue;
