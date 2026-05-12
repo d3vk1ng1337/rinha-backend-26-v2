@@ -317,9 +317,12 @@ fn findNearestProbes(
             const diff = cent - @as(F32x8, @splat(query[d]));
             cd += diff * diff;
         }
+        if (!@reduce(.Or, cd < @as(F32x8, @splat(probe_d[nprobe_fast - 1])))) continue;
         const dists: [block_size]f32 = cd;
         inline for (0..block_size) |lane| {
-            insertProbe(nprobe_fast, probe_d, probe_i, dists[lane], @intCast(c + lane));
+            if (dists[lane] < probe_d[nprobe_fast - 1]) {
+                insertProbe(nprobe_fast, probe_d, probe_i, dists[lane], @intCast(c + lane));
+            }
         }
     }
 
