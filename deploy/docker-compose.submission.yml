@@ -1,6 +1,6 @@
 services:
   api1:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:sha-58c144b7991e81f7386f62da25a3289cecc439b2
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:sha-b2a0e190eba7e032b43e5bf710873dd5bc9d9f77
     command: ["/sockets/api1.sock", "/index/index.bin", "1"]
     volumes:
       - sockets:/sockets
@@ -17,7 +17,7 @@ services:
           memory: "160MB"
 
   api2:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:sha-58c144b7991e81f7386f62da25a3289cecc439b2
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:sha-b2a0e190eba7e032b43e5bf710873dd5bc9d9f77
     command: ["/sockets/api2.sock", "/index/index.bin", "1"]
     volumes:
       - sockets:/sockets
@@ -34,7 +34,7 @@ services:
           memory: "160MB"
 
   lb:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-lb:sha-58c144b7991e81f7386f62da25a3289cecc439b2
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-lb:sha-b2a0e190eba7e032b43e5bf710873dd5bc9d9f77
     command: ["0.0.0.0:9999", "/sockets/api1.sock", "/sockets/api2.sock"]
     ports:
       - "9999:9999"
