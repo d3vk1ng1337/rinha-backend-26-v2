@@ -246,12 +246,7 @@ fn searchTop5(reader: *const Reader, query: *const [dims]f32, comptime nprobe_fa
     }
 
     if (fraud_count == 2 or fraud_count == 3) {
-        var ci: usize = 0;
-        while (ci < k) : (ci += 1) {
-            if (isScanned(&scanned, ci)) continue;
-            if (bboxLowerBoundF32(reader, ci, &q16) >= top.worst()) continue;
-            scanCluster(reader, ci, query, &top);
-        }
+        scanBboxFallback(reader, query, &q16, &scanned, &top);
     }
 
     return top;
@@ -337,6 +332,34 @@ fn scanCluster(reader: *const Reader, c: usize, query: *const [dims]f32, top: *T
     }
 }
 
+fn scanBboxFallback(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    q: *const [dims]i16,
+    scanned: *const [max_clusters / 64]u64,
+    top: *Top5,
+) void {
+    const k: usize = @intCast(reader.k);
+    var c: usize = 0;
+    while (c + block_size <= k) : (c += block_size) {
+        const lb = bboxLowerBoundVec8(reader, c, q);
+        const cutoff = top.worst() + 1e-6;
+        var lane: usize = 0;
+        while (lane < block_size) : (lane += 1) {
+            const ci = c + lane;
+            if (isScanned(scanned, ci)) continue;
+            if (lb[lane] >= cutoff) continue;
+            scanCluster(reader, ci, query, top);
+        }
+    }
+
+    while (c < k) : (c += 1) {
+        if (isScanned(scanned, c)) continue;
+        if (bboxLowerBoundF32(reader, c, q) >= top.worst()) continue;
+        scanCluster(reader, c, query, top);
+    }
+}
+
 inline fn scanBlockF32(
     query: *const [dims]f32,
     block: []align(2) const i16,
@@ -364,6 +387,24 @@ inline fn scanBlockF32(
 
 inline fn bboxLowerBoundF32(reader: *const Reader, c: usize, q: *const [dims]i16) f32 {
     return @as(f32, @floatFromInt(bboxLowerBound(reader, c, q))) * q16_dist_scale;
+}
+
+inline fn bboxLowerBoundVec8(reader: *const Reader, c: usize, q: *const [dims]i16) [block_size]f32 {
+    const k: usize = @intCast(reader.k);
+    var acc: F32x8 = @splat(0);
+    comptime var d: usize = 0;
+    inline while (d < dims) : (d += 1) {
+        const mn_i16: I16x8 = reader.bbox_min[d * k + c ..][0..block_size].*;
+        const mx_i16: I16x8 = reader.bbox_max[d * k + c ..][0..block_size].*;
+        const mn: F32x8 = @floatFromInt(@as(I32x8, @intCast(mn_i16)));
+        const mx: F32x8 = @floatFromInt(@as(I32x8, @intCast(mx_i16)));
+        const qv: F32x8 = @splat(@floatFromInt(q[d]));
+        const below = qv < mn;
+        const above = qv > mx;
+        const diff = @select(f32, below, mn - qv, @select(f32, above, qv - mx, @as(F32x8, @splat(0))));
+        acc += diff * diff * @as(F32x8, @splat(q16_dist_scale));
+    }
+    return acc;
 }
 
 inline fn accumDims(

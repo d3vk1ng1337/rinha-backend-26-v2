@@ -85,7 +85,7 @@ const Cursor = struct {
             } else break;
         }
         if (self.pos == start) return ParseError.BadNumber;
-        return std.fmt.parseFloat(f32, self.buf[start..self.pos]) catch ParseError.BadNumber;
+        return parseF32Lit(self.buf[start..self.pos]);
     }
 
     fn readI32(self: *Cursor) !i32 {
@@ -98,7 +98,7 @@ const Cursor = struct {
             } else break;
         }
         if (self.pos == start) return ParseError.BadNumber;
-        return std.fmt.parseInt(i32, self.buf[start..self.pos], 10) catch ParseError.BadNumber;
+        return parseI32Lit(self.buf[start..self.pos]);
     }
 
     fn readString(self: *Cursor) ![]const u8 {
@@ -174,6 +174,97 @@ const Cursor = struct {
         return false;
     }
 };
+
+fn parseF32Lit(s: []const u8) ParseError!f32 {
+    if (s.len == 0) return ParseError.BadNumber;
+
+    var i: usize = 0;
+    var sign: f64 = 1;
+    if (s[i] == '-') {
+        sign = -1;
+        i += 1;
+    } else if (s[i] == '+') {
+        i += 1;
+    }
+    if (i >= s.len) return ParseError.BadNumber;
+
+    var digits: usize = 0;
+    var int_part: f64 = 0;
+    while (i < s.len and isDigit(s[i])) : (i += 1) {
+        int_part = int_part * 10 + @as(f64, @floatFromInt(s[i] - '0'));
+        digits += 1;
+    }
+
+    var frac_part: f64 = 0;
+    var frac_scale: f64 = 1;
+    if (i < s.len and s[i] == '.') {
+        i += 1;
+        while (i < s.len and isDigit(s[i])) : (i += 1) {
+            frac_part = frac_part * 10 + @as(f64, @floatFromInt(s[i] - '0'));
+            frac_scale *= 10;
+            digits += 1;
+        }
+    }
+    if (digits == 0) return ParseError.BadNumber;
+
+    var value = sign * (int_part + frac_part / frac_scale);
+    if (i < s.len and (s[i] == 'e' or s[i] == 'E')) {
+        i += 1;
+        if (i >= s.len) return ParseError.BadNumber;
+        var exp_sign: i32 = 1;
+        if (s[i] == '-') {
+            exp_sign = -1;
+            i += 1;
+        } else if (s[i] == '+') {
+            i += 1;
+        }
+        if (i >= s.len or !isDigit(s[i])) return ParseError.BadNumber;
+        var exp: i32 = 0;
+        while (i < s.len and isDigit(s[i])) : (i += 1) {
+            exp = exp * 10 + @as(i32, @intCast(s[i] - '0'));
+            if (exp > 64) break;
+        }
+        value *= pow10i(exp_sign * exp);
+        while (i < s.len and isDigit(s[i])) : (i += 1) {}
+    }
+
+    if (i != s.len) return ParseError.BadNumber;
+    return @floatCast(value);
+}
+
+fn parseI32Lit(s: []const u8) ParseError!i32 {
+    if (s.len == 0) return ParseError.BadNumber;
+    var i: usize = 0;
+    var sign: i32 = 1;
+    if (s[i] == '-') {
+        sign = -1;
+        i += 1;
+    }
+    if (i >= s.len or !isDigit(s[i])) return ParseError.BadNumber;
+
+    var value: i32 = 0;
+    while (i < s.len and isDigit(s[i])) : (i += 1) {
+        value = value * 10 + @as(i32, @intCast(s[i] - '0'));
+    }
+    if (i != s.len) return ParseError.BadNumber;
+    return value * sign;
+}
+
+inline fn isDigit(c: u8) bool {
+    return c >= '0' and c <= '9';
+}
+
+fn pow10i(exp: i32) f64 {
+    if (exp == 0) return 1;
+    var e: u32 = @intCast(if (exp < 0) -exp else exp);
+    var base: f64 = 10;
+    var result: f64 = 1;
+    while (e != 0) : (e >>= 1) {
+        if ((e & 1) != 0) result *= base;
+        base *= base;
+    }
+    return if (exp < 0) 1 / result else result;
+}
 
 pub fn parseFeatures(body: []const u8, dst: *[14]f32) ParseError!void {
     var c = Cursor{ .buf = body, .pos = 0 };
