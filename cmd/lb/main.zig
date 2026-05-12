@@ -62,7 +62,15 @@ fn diagBucketIndex(us: u64) usize {
 }
 
 fn diagNowNs() u64 {
-    return @intCast(std.time.nanoTimestamp());
+    var ts: std.posix.timespec = undefined;
+    switch (std.posix.errno(std.posix.system.clock_gettime(.MONOTONIC, &ts))) {
+        .SUCCESS => {
+            const sec: u64 = @intCast(ts.sec);
+            const nsec: u64 = @intCast(ts.nsec);
+            return sec * 1_000_000_000 + nsec;
+        },
+        else => return 0,
+    }
 }
 
 fn diagElapsedNs(start_ns: u64) u64 {
@@ -77,7 +85,7 @@ fn diagRecord(metric: DiagMetric, ns: u64) void {
 
 fn diagStatsThread() void {
     while (true) {
-        std.time.sleep(2 * std.time.ns_per_s);
+        diagSleepTwoSeconds();
         var i: usize = 0;
         while (i < diag_metric_count) : (i += 1) {
             const hist = &diag_hists[i];
@@ -94,6 +102,11 @@ fn diagStatsThread() void {
             );
         }
     }
+}
+
+fn diagSleepTwoSeconds() void {
+    var req: std.posix.timespec = .{ .sec = 2, .nsec = 0 };
+    while (std.posix.errno(std.posix.system.nanosleep(&req, &req)) == .INTR) {}
 }
 
 var ctrl_paths: [][:0]const u8 = undefined;
