@@ -120,29 +120,30 @@ const ParsedRequest = struct {
 };
 
 fn parseRequest(buf: []const u8) struct { status: ParseStatus, req: ParsedRequest } {
-    const head_end = findHeaderEnd(buf) orelse {
+    const head_end = std.mem.indexOf(u8, buf, "\r\n\r\n") orelse {
         return .{ .status = .incomplete, .req = undefined };
     };
     const head = buf[0..head_end];
     const body_start = head_end + 4;
 
-    const line_end = findLineEnd(head, 0);
+    const line_end = std.mem.indexOf(u8, head, "\r\n") orelse head.len;
     const start_line = head[0..line_end];
 
     var endpoint: Endpoint = .not_found;
-    if (startsWithLit(start_line, "POST /fraud-score ")) {
+    if (std.mem.startsWith(u8, start_line, "POST /fraud-score ")) {
         endpoint = .fraud_score;
-    } else if (startsWithLit(start_line, "GET /ready ")) {
+    } else if (std.mem.startsWith(u8, start_line, "GET /ready ")) {
         endpoint = .ready;
     }
 
     var content_length: usize = 0;
     var idx: usize = line_end + 2;
     while (idx < head.len) {
-        const next = findLineEnd(head, idx);
+        const next = std.mem.indexOfPos(u8, head, idx, "\r\n") orelse head.len;
         const line = head[idx..next];
-        if (line.len >= 15 and eqlIgnoreAscii(line[0..15], "content-length:")) {
-            content_length = parseContentLengthValue(line[15..]) catch {
+        if (line.len >= 16 and std.ascii.eqlIgnoreCase(line[0..15], "content-length:")) {
+            const v = std.mem.trim(u8, line[15..], " \t");
+            content_length = std.fmt.parseInt(usize, v, 10) catch {
                 return .{ .status = .bad, .req = undefined };
             };
         }
@@ -162,54 +163,9 @@ fn parseRequest(buf: []const u8) struct { status: ParseStatus, req: ParsedReques
     };
 }
 
-fn findHeaderEnd(buf: []const u8) ?usize {
-    var i: usize = 0;
-    while (i + 3 < buf.len) : (i += 1) {
-        if (buf[i] == '\r' and buf[i + 1] == '\n' and buf[i + 2] == '\r' and buf[i + 3] == '\n') return i;
-    }
-    return null;
-}
-
-fn findLineEnd(buf: []const u8, start: usize) usize {
-    var i = start;
-    while (i + 1 < buf.len) : (i += 1) {
-        if (buf[i] == '\r' and buf[i + 1] == '\n') return i;
-    }
-    return buf.len;
-}
-
-fn parseContentLengthValue(raw: []const u8) !usize {
-    var i: usize = 0;
-    while (i < raw.len and (raw[i] == ' ' or raw[i] == '\t')) : (i += 1) {}
-    if (i >= raw.len or raw[i] < '0' or raw[i] > '9') return error.BadContentLength;
-
-    var value: usize = 0;
-    while (i < raw.len and raw[i] >= '0' and raw[i] <= '9') : (i += 1) {
-        value = value * 10 + @as(usize, raw[i] - '0');
-    }
-    while (i < raw.len and (raw[i] == ' ' or raw[i] == '\t')) : (i += 1) {}
-    if (i != raw.len) return error.BadContentLength;
-    return value;
-}
-
-inline fn startsWithLit(s: []const u8, comptime lit: []const u8) bool {
-    return s.len >= lit.len and std.mem.eql(u8, s[0..lit.len], lit);
-}
-
-fn eqlIgnoreAscii(a: []const u8, comptime b: []const u8) bool {
-    if (a.len != b.len) return false;
-    inline for (0..b.len) |i| {
-        const ca = a[i];
-        const cb = b[i];
-        const la = if (ca >= 'A' and ca <= 'Z') ca + 32 else ca;
-        const lb = if (cb >= 'A' and cb <= 'Z') cb + 32 else cb;
-        if (la != lb) return false;
-    }
-    return true;
-}
-
 const conn_pool_size: usize = 256;
 const ring_entries: u16 = 1024;
+const scratch_bytes: usize = 8 * 1024;
 const fd_queue_size: usize = conn_pool_size * 2;
 
 const FdQueue = struct {
@@ -271,6 +227,7 @@ const Conn = struct {
     out_ptr: [*]const u8 = undefined,
     out_len: usize = 0,
     out_sent: usize = 0,
+    scratch: [scratch_bytes]u8 = undefined,
     state: State = .idle,
     close_after_write: bool = false,
 
@@ -343,7 +300,7 @@ fn handleParsed(
             _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
         },
         .ok => {
-            const resp = pickResponse(reader, parsed.req);
+            const resp = pickResponse(reader, c, parsed.req);
             c.out_ptr = resp.ptr;
             c.out_len = resp.len;
             c.out_sent = 0;
@@ -355,12 +312,13 @@ fn handleParsed(
     }
 }
 
-fn pickResponse(reader: *const block_index.Reader, req: ParsedRequest) []const u8 {
+fn pickResponse(reader: *const block_index.Reader, c: *Conn, req: ParsedRequest) []const u8 {
     return switch (req.endpoint) {
         .ready => resp_ready,
         .fraud_score => blk: {
             if (req.body.len > max_request_bytes) break :blk resp_too_large_close;
-            const resp = http_io.handleBlock(reader, req.body) catch break :blk resp_internal_close;
+            var fba = std.heap.FixedBufferAllocator.init(c.scratch[0..]);
+            const resp = http_io.handleBlock(fba.allocator(), reader, req.body) catch break :blk resp_internal_close;
             break :blk resp;
         },
         .not_found => resp_not_found_close,
