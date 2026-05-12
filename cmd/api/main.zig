@@ -47,6 +47,7 @@ pub fn main(init: std.process.Init) !void {
     const aligned: []align(8) const u8 = @alignCast(mm.memory);
     const reader = try block_index.Reader.init(aligned);
     std.log.info("api: block index loaded — n={} k={} blocks={}", .{ reader.n, reader.k, reader.total_blocks });
+    warmBlockIndex(&reader);
 
     cwd.deleteFile(io, sock_path) catch |err| switch (err) {
         error.FileNotFound => {},
@@ -323,6 +324,37 @@ fn pickResponse(reader: *const block_index.Reader, c: *Conn, req: ParsedRequest)
         },
         .not_found => resp_not_found_close,
     };
+}
+
+fn warmBlockIndex(reader: *const block_index.Reader) void {
+    var state: u32 = 0x1234_5678;
+    var sink: u8 = 0;
+
+    var i: usize = 0;
+    while (i < 512) : (i += 1) {
+        var q: [block_index.dims]f32 = undefined;
+
+        var d: usize = 0;
+        while (d < block_index.dims) : (d += 1) {
+            state = state *% 1_664_525 +% 1_013_904_223;
+            const raw = state >> 8;
+            q[d] = @as(f32, @floatFromInt(raw)) * (1.0 / 16_777_216.0);
+        }
+
+        if ((i & 7) == 0) {
+            q[5] = -1;
+            q[6] = -1;
+        }
+
+        sink +%= block_index.searchFraudCountTwoTier(
+            reader,
+            &q,
+            block_index.default_nprobe_fast,
+            block_index.default_nprobe_full,
+        );
+    }
+
+    std.mem.doNotOptimizeAway(sink);
 }
 
 fn parseWorkerCountArg(arg: ?[]const u8) !usize {
