@@ -172,13 +172,16 @@ const FdQueue = struct {
     fds: [fd_queue_size]i32 = undefined,
     len: usize = 0,
 
-    fn push(self: *FdQueue, fd: i32) bool {
+    const PushResult = enum { queued_notify, queued_silent, full };
+
+    fn push(self: *FdQueue, fd: i32) PushResult {
         self.lock();
         defer self.mutex.unlock();
-        if (self.len == self.fds.len) return false;
+        if (self.len == self.fds.len) return .full;
+        const was_empty = self.len == 0;
         self.fds[self.len] = fd;
         self.len += 1;
-        return true;
+        return if (was_empty) .queued_notify else .queued_silent;
     }
 
     fn pop(self: *FdQueue) ?i32 {
@@ -257,10 +260,10 @@ fn controlThread(ctx: *ControlThreadCtx) void {
         defer fdpass.closeFd(conn_fd);
 
         while (fdpass.recvFd(conn_fd)) |fd| {
-            if (ctx.queue.push(fd)) {
-                fdpass.notifyEvent(ctx.event_fd);
-            } else {
-                fdpass.closeFd(fd);
+            switch (ctx.queue.push(fd)) {
+                .queued_notify => fdpass.notifyEvent(ctx.event_fd),
+                .queued_silent => {},
+                .full => fdpass.closeFd(fd),
             }
         }
     }
