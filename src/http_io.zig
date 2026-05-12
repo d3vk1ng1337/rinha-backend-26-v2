@@ -11,12 +11,12 @@ pub const Response = struct {
     approved: bool,
 };
 
-const resp_0 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 33\r\n\r\n{\"approved\":true,\"fraud_score\":0}";
-const resp_1 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 35\r\n\r\n{\"approved\":true,\"fraud_score\":0.2}";
-const resp_2 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 35\r\n\r\n{\"approved\":true,\"fraud_score\":0.4}";
-const resp_3 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 36\r\n\r\n{\"approved\":false,\"fraud_score\":0.6}";
-const resp_4 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 36\r\n\r\n{\"approved\":false,\"fraud_score\":0.8}";
-const resp_5 = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 34\r\n\r\n{\"approved\":false,\"fraud_score\":1}";
+const resp_0 = "HTTP/1.1 200 OK\r\nContent-Length: 33\r\n\r\n{\"approved\":true,\"fraud_score\":0}";
+const resp_1 = "HTTP/1.1 200 OK\r\nContent-Length: 35\r\n\r\n{\"approved\":true,\"fraud_score\":0.2}";
+const resp_2 = "HTTP/1.1 200 OK\r\nContent-Length: 35\r\n\r\n{\"approved\":true,\"fraud_score\":0.4}";
+const resp_3 = "HTTP/1.1 200 OK\r\nContent-Length: 36\r\n\r\n{\"approved\":false,\"fraud_score\":0.6}";
+const resp_4 = "HTTP/1.1 200 OK\r\nContent-Length: 36\r\n\r\n{\"approved\":false,\"fraud_score\":0.8}";
+const resp_5 = "HTTP/1.1 200 OK\r\nContent-Length: 34\r\n\r\n{\"approved\":false,\"fraud_score\":1}";
 
 const fraud_responses = [_][]const u8{ resp_0, resp_1, resp_2, resp_3, resp_4, resp_5 };
 
