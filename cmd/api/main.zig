@@ -4,6 +4,7 @@ const lib = @import("lib");
 const block_index = lib.block_index;
 const http_io = lib.http_io;
 const fdpass = lib.fdpass;
+const fast_parser = lib.fast_parser;
 const linux = std.os.linux;
 
 pub const std_options: std.Options = .{
@@ -11,6 +12,105 @@ pub const std_options: std.Options = .{
 };
 
 const max_request_bytes: usize = 4 * 1024;
+const diag_instrument = true;
+
+const DiagMetric = enum(usize) {
+    queue_notify,
+    fd_queue_wait,
+    notify_drain,
+    http_parse,
+    features,
+    search,
+    app,
+    write,
+};
+
+const diag_metric_count: usize = 8;
+const diag_metric_names = [_][]const u8{
+    "queue_notify",
+    "fd_queue_wait",
+    "notify_drain",
+    "http_parse",
+    "features",
+    "search",
+    "app",
+    "write",
+};
+const diag_bucket_limits_us = [_]u64{ 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
+const diag_bucket_count = diag_bucket_limits_us.len + 1;
+
+const DiagHist = struct {
+    count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    sum_us: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    buckets: [diag_bucket_count]std.atomic.Value(u64) = .{std.atomic.Value(u64).init(0)} ** diag_bucket_count,
+
+    fn record(self: *DiagHist, ns: u64) void {
+        const us = ns / 1000;
+        _ = self.count.fetchAdd(1, .monotonic);
+        _ = self.sum_us.fetchAdd(us, .monotonic);
+        _ = self.buckets[diagBucketIndex(us)].fetchAdd(1, .monotonic);
+    }
+
+    fn percentileUpperUs(self: *DiagHist, total: u64, pct: u64) u64 {
+        if (total == 0) return 0;
+        const target = (total * pct + 99) / 100;
+        var acc: u64 = 0;
+        var i: usize = 0;
+        while (i < diag_bucket_count) : (i += 1) {
+            acc += self.buckets[i].load(.monotonic);
+            if (acc >= target) {
+                if (i < diag_bucket_limits_us.len) return diag_bucket_limits_us[i];
+                return std.math.maxInt(u64);
+            }
+        }
+        return std.math.maxInt(u64);
+    }
+};
+
+var diag_hists: [diag_metric_count]DiagHist = .{DiagHist{}} ** diag_metric_count;
+
+fn diagBucketIndex(us: u64) usize {
+    var i: usize = 0;
+    while (i < diag_bucket_limits_us.len) : (i += 1) {
+        if (us <= diag_bucket_limits_us[i]) return i;
+    }
+    return diag_bucket_limits_us.len;
+}
+
+fn diagNowNs() u64 {
+    return @intCast(std.time.nanoTimestamp());
+}
+
+fn diagElapsedNs(start_ns: u64) u64 {
+    const end_ns = diagNowNs();
+    return if (end_ns >= start_ns) end_ns - start_ns else 0;
+}
+
+fn diagRecord(metric: DiagMetric, ns: u64) void {
+    if (!diag_instrument) return;
+    diag_hists[@intFromEnum(metric)].record(ns);
+}
+
+fn diagStatsThread() void {
+    while (true) {
+        std.time.sleep(2 * std.time.ns_per_s);
+        var i: usize = 0;
+        while (i < diag_metric_count) : (i += 1) {
+            const hist = &diag_hists[i];
+            const count = hist.count.load(.monotonic);
+            if (count == 0) continue;
+            const sum_us = hist.sum_us.load(.monotonic);
+            const mean_us = sum_us / count;
+            const p50_us = hist.percentileUpperUs(count, 50);
+            const p90_us = hist.percentileUpperUs(count, 90);
+            const p99_us = hist.percentileUpperUs(count, 99);
+            std.debug.print(
+                "INSTR api metric={s} count={} mean_us={} p50_le_us={} p90_le_us={} p99_le_us={}\n",
+                .{ diag_metric_names[i], count, mean_us, p50_us, p90_us, p99_us },
+            );
+        }
+    }
+}
 
 const resp_bad_req_close: []const u8 = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 const resp_too_large_close: []const u8 = "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -69,6 +169,9 @@ pub fn main(init: std.process.Init) !void {
     }
 
     std.log.info("api: io_uring loop, {} workers", .{num_workers});
+    if (diag_instrument) {
+        if (std.Thread.spawn(.{}, diagStatsThread, .{}) catch null) |t| t.detach();
+    }
 
     const ctrl_path_z = try std.mem.concatWithSentinel(ally, u8, &.{ sock_path, ".ctrl" }, 0);
     const ctrl_fd = try fdpass.openUnixListener(ctrl_path_z);
@@ -169,21 +272,29 @@ const ring_entries: u16 = 1024;
 const scratch_bytes: usize = 8 * 1024;
 const fd_queue_size: usize = conn_pool_size * 2;
 
+const QueuedFd = struct {
+    fd: i32,
+    queued_ns: u64,
+};
+
 const FdQueue = struct {
     mutex: std.atomic.Mutex = .unlocked,
-    fds: [fd_queue_size]i32 = undefined,
+    fds: [fd_queue_size]QueuedFd = undefined,
     len: usize = 0,
 
     fn push(self: *FdQueue, fd: i32) bool {
         self.lock();
         defer self.mutex.unlock();
         if (self.len == self.fds.len) return false;
-        self.fds[self.len] = fd;
+        self.fds[self.len] = .{
+            .fd = fd,
+            .queued_ns = diagNowNs(),
+        };
         self.len += 1;
         return true;
     }
 
-    fn pop(self: *FdQueue) ?i32 {
+    fn pop(self: *FdQueue) ?QueuedFd {
         self.lock();
         defer self.mutex.unlock();
         if (self.len == 0) return null;
@@ -228,6 +339,7 @@ const Conn = struct {
     out_ptr: [*]const u8 = undefined,
     out_len: usize = 0,
     out_sent: usize = 0,
+    write_started_ns: u64 = 0,
     scratch: [scratch_bytes]u8 = undefined,
     state: State = .idle,
     close_after_write: bool = false,
@@ -260,8 +372,10 @@ fn controlThread(ctx: *ControlThreadCtx) void {
         defer fdpass.closeFd(conn_fd);
 
         while (fdpass.recvFd(conn_fd)) |fd| {
+            const notify_start = diagNowNs();
             if (ctx.queue.push(fd)) {
                 fdpass.notifyEvent(ctx.event_fd);
+                diagRecord(.queue_notify, diagElapsedNs(notify_start));
             } else {
                 fdpass.closeFd(fd);
             }
@@ -275,7 +389,10 @@ fn handleParsed(
     c: *Conn,
     idx: u32,
 ) !void {
+    const app_start = diagNowNs();
+    const parse_start = diagNowNs();
     const parsed = parseRequest(c.buf[0..c.buf_len]);
+    diagRecord(.http_parse, diagElapsedNs(parse_start));
     switch (parsed.status) {
         .incomplete => {
             if (c.buf_len >= c.buf.len) {
@@ -285,7 +402,9 @@ fn handleParsed(
                 c.consumed_len = c.buf_len;
                 c.close_after_write = true;
                 c.state = .writing;
+                c.write_started_ns = diagNowNs();
                 _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
+                diagRecord(.app, diagElapsedNs(app_start));
             } else {
                 c.state = .reading;
                 _ = try ring.read(makeUserData(idx, .read), c.fd, .{ .buffer = c.buf[c.buf_len..] }, 0);
@@ -298,7 +417,9 @@ fn handleParsed(
             c.consumed_len = c.buf_len;
             c.close_after_write = true;
             c.state = .writing;
+            c.write_started_ns = diagNowNs();
             _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
+            diagRecord(.app, diagElapsedNs(app_start));
         },
         .ok => {
             const resp = pickResponse(reader, c, parsed.req);
@@ -308,7 +429,9 @@ fn handleParsed(
             c.consumed_len = parsed.req.total_len;
             c.close_after_write = (parsed.req.endpoint == .not_found);
             c.state = .writing;
+            c.write_started_ns = diagNowNs();
             _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
+            diagRecord(.app, diagElapsedNs(app_start));
         },
     }
 }
@@ -318,6 +441,22 @@ fn pickResponse(reader: *const block_index.Reader, c: *Conn, req: ParsedRequest)
         .ready => resp_ready,
         .fraud_score => blk: {
             if (req.body.len > max_request_bytes) break :blk resp_too_large_close;
+            if (diag_instrument) {
+                var f: [block_index.dims]f32 = undefined;
+                const features_start = diagNowNs();
+                fast_parser.parseFeatures(req.body, &f) catch break :blk resp_internal_close;
+                diagRecord(.features, diagElapsedNs(features_start));
+
+                const search_start = diagNowNs();
+                const count = block_index.searchFraudCountTwoTier(
+                    reader,
+                    &f,
+                    block_index.default_nprobe_fast,
+                    block_index.default_nprobe_full,
+                );
+                diagRecord(.search, diagElapsedNs(search_start));
+                break :blk http_io.responseForCount(count);
+            }
             var fba = std.heap.FixedBufferAllocator.init(c.scratch[0..]);
             const resp = http_io.handleBlock(fba.allocator(), reader, req.body) catch break :blk resp_internal_close;
             break :blk resp;
@@ -385,6 +524,7 @@ fn activateConn(ring: *linux.IoUring, worker: *Worker, new_fd: i32) !void {
     c.consumed_len = 0;
     c.out_len = 0;
     c.out_sent = 0;
+    c.write_started_ns = 0;
     c.close_after_write = false;
     c.state = .reading;
     _ = try ring.read(
@@ -396,9 +536,12 @@ fn activateConn(ring: *linux.IoUring, worker: *Worker, new_fd: i32) !void {
 }
 
 fn drainPassedFds(ring: *linux.IoUring, worker: *Worker, fd_queue: *FdQueue) !void {
-    while (fd_queue.pop()) |fd| {
-        try activateConn(ring, worker, fd);
+    const drain_start = diagNowNs();
+    while (fd_queue.pop()) |item| {
+        diagRecord(.fd_queue_wait, diagElapsedNs(item.queued_ns));
+        try activateConn(ring, worker, item.fd);
     }
+    diagRecord(.notify_drain, diagElapsedNs(drain_start));
 }
 
 fn runIoUringLoop(
@@ -458,6 +601,10 @@ fn runIoUringLoop(
                 },
                 .write => {
                     const c = &worker.conns[ud.idx];
+                    if (c.write_started_ns != 0) {
+                        diagRecord(.write, diagElapsedNs(c.write_started_ns));
+                        c.write_started_ns = 0;
+                    }
                     if (cqe.res <= 0) {
                         c.state = .closing;
                         _ = try ring.close(makeUserData(ud.idx, .close), c.fd);
@@ -466,6 +613,7 @@ fn runIoUringLoop(
                     const wrote: usize = @intCast(cqe.res);
                     c.out_sent += wrote;
                     if (c.out_sent < c.out_len) {
+                        c.write_started_ns = diagNowNs();
                         _ = try ring.write(
                             makeUserData(ud.idx, .write),
                             c.fd,

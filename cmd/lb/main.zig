@@ -10,8 +10,91 @@ const linux = if (builtin.os.tag == .linux) std.os.linux else struct {};
 
 const ring_entries: u16 = 1024;
 const accept_idx: u32 = std.math.maxInt(u32);
+const diag_instrument = true;
 
 const Op = enum(u8) { accept = 1, close_orphan };
+
+const DiagMetric = enum(usize) {
+    pass_fd,
+};
+
+const diag_metric_count: usize = 1;
+const diag_metric_names = [_][]const u8{"pass_fd"};
+const diag_bucket_limits_us = [_]u64{ 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
+const diag_bucket_count = diag_bucket_limits_us.len + 1;
+
+const DiagHist = struct {
+    count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    sum_us: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    buckets: [diag_bucket_count]std.atomic.Value(u64) = .{std.atomic.Value(u64).init(0)} ** diag_bucket_count,
+
+    fn record(self: *DiagHist, ns: u64) void {
+        const us = ns / 1000;
+        _ = self.count.fetchAdd(1, .monotonic);
+        _ = self.sum_us.fetchAdd(us, .monotonic);
+        _ = self.buckets[diagBucketIndex(us)].fetchAdd(1, .monotonic);
+    }
+
+    fn percentileUpperUs(self: *DiagHist, total: u64, pct: u64) u64 {
+        if (total == 0) return 0;
+        const target = (total * pct + 99) / 100;
+        var acc: u64 = 0;
+        var i: usize = 0;
+        while (i < diag_bucket_count) : (i += 1) {
+            acc += self.buckets[i].load(.monotonic);
+            if (acc >= target) {
+                if (i < diag_bucket_limits_us.len) return diag_bucket_limits_us[i];
+                return std.math.maxInt(u64);
+            }
+        }
+        return std.math.maxInt(u64);
+    }
+};
+
+var diag_hists: [diag_metric_count]DiagHist = .{DiagHist{}} ** diag_metric_count;
+
+fn diagBucketIndex(us: u64) usize {
+    var i: usize = 0;
+    while (i < diag_bucket_limits_us.len) : (i += 1) {
+        if (us <= diag_bucket_limits_us[i]) return i;
+    }
+    return diag_bucket_limits_us.len;
+}
+
+fn diagNowNs() u64 {
+    return @intCast(std.time.nanoTimestamp());
+}
+
+fn diagElapsedNs(start_ns: u64) u64 {
+    const end_ns = diagNowNs();
+    return if (end_ns >= start_ns) end_ns - start_ns else 0;
+}
+
+fn diagRecord(metric: DiagMetric, ns: u64) void {
+    if (!diag_instrument) return;
+    diag_hists[@intFromEnum(metric)].record(ns);
+}
+
+fn diagStatsThread() void {
+    while (true) {
+        std.time.sleep(2 * std.time.ns_per_s);
+        var i: usize = 0;
+        while (i < diag_metric_count) : (i += 1) {
+            const hist = &diag_hists[i];
+            const count = hist.count.load(.monotonic);
+            if (count == 0) continue;
+            const sum_us = hist.sum_us.load(.monotonic);
+            const mean_us = sum_us / count;
+            const p50_us = hist.percentileUpperUs(count, 50);
+            const p90_us = hist.percentileUpperUs(count, 90);
+            const p99_us = hist.percentileUpperUs(count, 99);
+            std.debug.print(
+                "INSTR lb metric={s} count={} mean_us={} p50_le_us={} p90_le_us={} p99_le_us={}\n",
+                .{ diag_metric_names[i], count, mean_us, p50_us, p90_us, p99_us },
+            );
+        }
+    }
+}
 
 var ctrl_paths: [][:0]const u8 = undefined;
 var ctrl_fds: []i32 = undefined;
@@ -48,6 +131,9 @@ pub fn main(init: std.process.Init) !void {
 
     const listen_fd = try openTcpListener(args[0]);
     std.log.info("lb: fd-pass listening on {s}, upstreams={d}", .{ args[0], ctrl_fds.len });
+    if (diag_instrument) {
+        if (std.Thread.spawn(.{}, diagStatsThread, .{}) catch null) |t| t.detach();
+    }
 
     try runIoUringLoop(listen_fd);
 }
@@ -163,6 +249,9 @@ fn runIoUringLoop(listen_fd: i32) !void {
 }
 
 fn passAcceptedFd(client_fd: i32) !void {
+    const pass_start = diagNowNs();
+    defer diagRecord(.pass_fd, diagElapsedNs(pass_start));
+
     setNoDelay(client_fd);
 
     const idx = rr_counter % ctrl_fds.len;
