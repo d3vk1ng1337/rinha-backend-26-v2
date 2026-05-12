@@ -9,6 +9,10 @@ pub const std_options: std.Options = .{
 const linux = if (builtin.os.tag == .linux) std.os.linux else struct {};
 
 const ring_entries: u16 = 1024;
+const uring_setup_flags: u32 = if (builtin.os.tag == .linux)
+    linux.IORING_SETUP_SINGLE_ISSUER | linux.IORING_SETUP_COOP_TASKRUN
+else
+    0;
 const accept_idx: u32 = std.math.maxInt(u32);
 
 const Op = enum(u8) { accept = 1, close_orphan };
@@ -132,7 +136,7 @@ fn parseUd(ud: u64) struct { idx: u32, op: Op } {
 
 fn runIoUringLoop(listen_fd: i32) !void {
     if (builtin.os.tag != .linux) return error.Unsupported;
-    var ring = try linux.IoUring.init(ring_entries, 0);
+    var ring = try initIoUring(ring_entries);
     defer ring.deinit();
 
     _ = try ring.accept(makeUd(accept_idx, .accept), listen_fd, null, null, linux.SOCK.CLOEXEC);
@@ -160,6 +164,13 @@ fn runIoUringLoop(listen_fd: i32) !void {
             }
         }
     }
+}
+
+fn initIoUring(entries: u16) !linux.IoUring {
+    return linux.IoUring.init(entries, uring_setup_flags) catch |err| switch (err) {
+        error.ArgumentsInvalid, error.PermissionDenied, error.SystemOutdated => linux.IoUring.init(entries, 0),
+        else => return err,
+    };
 }
 
 fn passAcceptedFd(client_fd: i32) !void {

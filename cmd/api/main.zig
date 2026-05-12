@@ -166,6 +166,7 @@ fn parseRequest(buf: []const u8) struct { status: ParseStatus, req: ParsedReques
 
 const conn_pool_size: usize = 256;
 const ring_entries: u16 = 1024;
+const uring_setup_flags: u32 = linux.IORING_SETUP_SINGLE_ISSUER | linux.IORING_SETUP_COOP_TASKRUN;
 const scratch_bytes: usize = 8 * 1024;
 const fd_queue_size: usize = conn_pool_size * 2;
 
@@ -410,7 +411,7 @@ fn runIoUringLoop(
 ) !void {
     if (builtin.os.tag != .linux) return error.Unsupported;
 
-    var ring = try linux.IoUring.init(ring_entries, 0);
+    var ring = try initIoUring(ring_entries);
     defer ring.deinit();
 
     worker.init();
@@ -510,4 +511,11 @@ fn runIoUringLoop(
             }
         }
     }
+}
+
+fn initIoUring(entries: u16) !linux.IoUring {
+    return linux.IoUring.init(entries, uring_setup_flags) catch |err| switch (err) {
+        error.ArgumentsInvalid, error.PermissionDenied, error.SystemOutdated => linux.IoUring.init(entries, 0),
+        else => return err,
+    };
 }
