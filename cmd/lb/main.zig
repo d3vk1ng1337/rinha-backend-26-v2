@@ -8,11 +8,6 @@ pub const std_options: std.Options = .{
 
 const linux = if (builtin.os.tag == .linux) std.os.linux else struct {};
 
-const ring_entries: u16 = 1024;
-const accept_idx: u32 = std.math.maxInt(u32);
-
-const Op = enum(u8) { accept = 1, close_orphan };
-
 var ctrl_paths: [][:0]const u8 = undefined;
 var ctrl_fds: []i32 = undefined;
 var rr_counter: usize = 0;
@@ -49,7 +44,7 @@ pub fn main(init: std.process.Init) !void {
     const listen_fd = try openTcpListener(args[0]);
     std.log.info("lb: fd-pass listening on {s}, upstreams={d}", .{ args[0], ctrl_fds.len });
 
-    try runIoUringLoop(listen_fd);
+    try runAcceptLoop(listen_fd);
 }
 
 fn parseHostPort(s: []const u8) !struct { host: []const u8, port: u16 } {
@@ -118,46 +113,15 @@ fn connectWithRetry(path: [:0]const u8) i32 {
     }
 }
 
-fn makeUd(idx: u32, op: Op) u64 {
-    const op_byte: u64 = @intFromEnum(op);
-    return (op_byte << 32) | @as(u64, idx);
-}
-
-fn parseUd(ud: u64) struct { idx: u32, op: Op } {
-    return .{
-        .idx = @truncate(ud),
-        .op = @enumFromInt(@as(u8, @truncate(ud >> 32))),
-    };
-}
-
-fn runIoUringLoop(listen_fd: i32) !void {
+fn runAcceptLoop(listen_fd: i32) !void {
     if (builtin.os.tag != .linux) return error.Unsupported;
-    var ring = try linux.IoUring.init(ring_entries, 0);
-    defer ring.deinit();
 
-    _ = try ring.accept(makeUd(accept_idx, .accept), listen_fd, null, null, linux.SOCK.CLOEXEC);
-
-    var cqes: [128]linux.io_uring_cqe = undefined;
     while (true) {
-        _ = ring.submit_and_wait(1) catch |err| switch (err) {
-            error.SignalInterrupt => continue,
-            else => return err,
-        };
-
-        const n = try ring.copy_cqes(&cqes, 0);
-        var i: u32 = 0;
-        while (i < n) : (i += 1) {
-            const cqe = cqes[i];
-            const ud = parseUd(cqe.user_data);
-            switch (ud.op) {
-                .accept => {
-                    if (cqe.res >= 0) {
-                        try passAcceptedFd(cqe.res);
-                    }
-                    _ = try ring.accept(makeUd(accept_idx, .accept), listen_fd, null, null, linux.SOCK.CLOEXEC);
-                },
-                .close_orphan => {},
-            }
+        const accept_r = linux.accept4(listen_fd, null, null, linux.SOCK.CLOEXEC);
+        switch (linux.errno(accept_r)) {
+            .SUCCESS => try passAcceptedFd(@intCast(@as(isize, @bitCast(accept_r)))),
+            .INTR => continue,
+            else => continue,
         }
     }
 }
