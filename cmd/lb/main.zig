@@ -9,7 +9,6 @@ pub const std_options: std.Options = .{
 const linux = if (builtin.os.tag == .linux) std.os.linux else struct {};
 
 const ring_entries: u16 = 1024;
-const accept_batch: usize = 32;
 const accept_idx: u32 = std.math.maxInt(u32);
 
 const Op = enum(u8) { accept = 1, close_orphan };
@@ -136,10 +135,7 @@ fn runIoUringLoop(listen_fd: i32) !void {
     var ring = try linux.IoUring.init(ring_entries, 0);
     defer ring.deinit();
 
-    var accepts: usize = 0;
-    while (accepts < accept_batch) : (accepts += 1) {
-        try submitAccept(&ring, listen_fd);
-    }
+    _ = try ring.accept(makeUd(accept_idx, .accept), listen_fd, null, null, linux.SOCK.CLOEXEC);
 
     var cqes: [128]linux.io_uring_cqe = undefined;
     while (true) {
@@ -158,16 +154,12 @@ fn runIoUringLoop(listen_fd: i32) !void {
                     if (cqe.res >= 0) {
                         try passAcceptedFd(cqe.res);
                     }
-                    try submitAccept(&ring, listen_fd);
+                    _ = try ring.accept(makeUd(accept_idx, .accept), listen_fd, null, null, linux.SOCK.CLOEXEC);
                 },
                 .close_orphan => {},
             }
         }
     }
-}
-
-inline fn submitAccept(ring: *linux.IoUring, listen_fd: i32) !void {
-    _ = try ring.accept(makeUd(accept_idx, .accept), listen_fd, null, null, linux.SOCK.CLOEXEC);
 }
 
 fn passAcceptedFd(client_fd: i32) !void {
