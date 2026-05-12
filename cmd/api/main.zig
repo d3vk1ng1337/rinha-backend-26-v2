@@ -165,6 +165,7 @@ fn parseRequest(buf: []const u8) struct { status: ParseStatus, req: ParsedReques
 
 const conn_pool_size: usize = 256;
 const ring_entries: u16 = 1024;
+const scratch_bytes: usize = 8 * 1024;
 const fd_queue_size: usize = conn_pool_size * 2;
 
 const FdQueue = struct {
@@ -226,6 +227,7 @@ const Conn = struct {
     out_ptr: [*]const u8 = undefined,
     out_len: usize = 0,
     out_sent: usize = 0,
+    scratch: [scratch_bytes]u8 = undefined,
     state: State = .idle,
     close_after_write: bool = false,
 
@@ -298,7 +300,7 @@ fn handleParsed(
             _ = try ring.write(makeUserData(idx, .write), c.fd, c.out_ptr[0..c.out_len], 0);
         },
         .ok => {
-            const resp = pickResponse(reader, parsed.req);
+            const resp = pickResponse(reader, c, parsed.req);
             c.out_ptr = resp.ptr;
             c.out_len = resp.len;
             c.out_sent = 0;
@@ -310,12 +312,13 @@ fn handleParsed(
     }
 }
 
-fn pickResponse(reader: *const block_index.Reader, req: ParsedRequest) []const u8 {
+fn pickResponse(reader: *const block_index.Reader, c: *Conn, req: ParsedRequest) []const u8 {
     return switch (req.endpoint) {
         .ready => resp_ready,
         .fraud_score => blk: {
             if (req.body.len > max_request_bytes) break :blk resp_too_large_close;
-            const resp = http_io.handleBlock(reader, req.body) catch break :blk resp_internal_close;
+            var fba = std.heap.FixedBufferAllocator.init(c.scratch[0..]);
+            const resp = http_io.handleBlock(fba.allocator(), reader, req.body) catch break :blk resp_internal_close;
             break :blk resp;
         },
         .not_found => resp_not_found_close,

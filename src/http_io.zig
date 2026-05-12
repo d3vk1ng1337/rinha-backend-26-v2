@@ -41,9 +41,12 @@ pub fn handle(
 }
 
 pub fn handleBlock(
+    ally: std.mem.Allocator,
     reader: *const block_index.Reader,
     body: []const u8,
 ) ![]const u8 {
+    _ = ally;
+
     var f: [block_index.dims]f32 = undefined;
     try fast_parser.parseFeatures(body, &f);
 
