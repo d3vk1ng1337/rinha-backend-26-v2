@@ -50,7 +50,12 @@ pub fn handleBlock(
     var f: [block_index.dims]f32 = undefined;
     try fast_parser.parseFeatures(body, &f);
 
-    const count = block_index.searchFraudCount(reader, &f, block_index.default_nprobe_fast);
+    const count = block_index.searchFraudCountTwoTier(
+        reader,
+        &f,
+        block_index.default_nprobe_fast,
+        block_index.default_nprobe_full,
+    );
     return fraud_responses[count];
 }
 

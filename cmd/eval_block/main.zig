@@ -5,7 +5,8 @@ const fast_parser = lib.fast_parser;
 
 const dim = block_index.dims;
 const variants = [_]Variant{
-    .{ .name = "prod_fast12_bbox_all", .mode = .bbox_all, .fast = 12, .full = 0 },
+    .{ .name = "prod_fast8_full48", .mode = .two_tier, .fast = 8, .full = 48 },
+    .{ .name = "legacy_fast12_bbox_all", .mode = .bbox_all, .fast = 12, .full = 0 },
     .{ .name = "fast12_full24", .mode = .two_tier, .fast = 12, .full = 24 },
     .{ .name = "fast5_full32", .mode = .two_tier, .fast = 5, .full = 32 },
     .{ .name = "fast8_full32", .mode = .two_tier, .fast = 8, .full = 32 },

@@ -1,6 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
 
+const init_sample_size: usize = 50_000;
+
 pub fn cluster(
     ally: std.mem.Allocator,
     data: []const f32,
@@ -16,16 +18,7 @@ pub fn cluster(
     if (data.len != n * dim) return error.BadArgs;
     if (n < k) return error.NotEnoughData;
 
-    var rng = std.Random.DefaultPrng.init(0xC0FFEE);
-    const random = rng.random();
-
-    {
-        var c: usize = 0;
-        while (c < k) : (c += 1) {
-            const src = random.intRangeLessThan(usize, 0, n);
-            @memcpy(centroids[c * dim ..][0..dim], data[src * dim ..][0..dim]);
-        }
-    }
+    try initPlusPlus(ally, data, n, dim, k, 0xdeadbeef_cafebabe, centroids);
 
     const sums = try ally.alloc(f32, k * dim);
     defer ally.free(sums);
@@ -57,6 +50,83 @@ pub fn cluster(
         }
         std.log.info("kmeans: iter {}/{}", .{ iter + 1, iters });
     }
+}
+
+fn initPlusPlus(
+    ally: std.mem.Allocator,
+    data: []const f32,
+    n: usize,
+    dim: usize,
+    k: usize,
+    seed: u64,
+    centroids: []f32,
+) !void {
+    var rng = std.Random.DefaultPrng.init(seed);
+    const random = rng.random();
+
+    const sample_size: usize = @min(n, init_sample_size);
+    const sample = try ally.alloc(usize, sample_size);
+    defer ally.free(sample);
+
+    if (n <= init_sample_size) {
+        var i: usize = 0;
+        while (i < sample_size) : (i += 1) sample[i] = i;
+    } else {
+        var i: usize = 0;
+        while (i < sample_size) : (i += 1) {
+            sample[i] = random.intRangeLessThan(usize, 0, n);
+        }
+    }
+
+    const first = sample[random.intRangeLessThan(usize, 0, sample_size)];
+    @memcpy(centroids[0..dim], data[first * dim ..][0..dim]);
+
+    const min_dists = try ally.alloc(f32, sample_size);
+    defer ally.free(min_dists);
+    @memset(min_dists, std.math.inf(f32));
+
+    var c: usize = 1;
+    while (c < k) : (c += 1) {
+        const last = centroids[(c - 1) * dim ..][0..dim];
+        var total: f64 = 0;
+
+        var si: usize = 0;
+        while (si < sample_size) : (si += 1) {
+            const vi = sample[si];
+            const d = distSq(data[vi * dim ..][0..dim], last, dim);
+            if (d < min_dists[si]) min_dists[si] = d;
+            total += min_dists[si];
+        }
+
+        var chosen_si: usize = sample_size - 1;
+        if (total > 0 and std.math.isFinite(total)) {
+            const target = random.float(f64) * total;
+            var acc: f64 = 0;
+            si = 0;
+            while (si < sample_size) : (si += 1) {
+                acc += min_dists[si];
+                if (acc >= target) {
+                    chosen_si = si;
+                    break;
+                }
+            }
+        } else {
+            chosen_si = random.intRangeLessThan(usize, 0, sample_size);
+        }
+
+        const chosen = sample[chosen_si];
+        @memcpy(centroids[c * dim ..][0..dim], data[chosen * dim ..][0..dim]);
+    }
+}
+
+fn distSq(a: []const f32, b: []const f32, dim: usize) f32 {
+    var out: f32 = 0;
+    var d: usize = 0;
+    while (d < dim) : (d += 1) {
+        const diff = a[d] - b[d];
+        out += diff * diff;
+    }
+    return out;
 }
 
 pub fn nearest(v: []const f32, centroids: []const f32, k: usize, dim: usize) u32 {
@@ -195,6 +265,24 @@ test "cluster converges on simple separated data" {
     try testing.expect(a0_label != a50_label);
     for (assignments[0..50]) |a| try testing.expectEqual(a0_label, a);
     for (assignments[50..]) |a| try testing.expectEqual(a50_label, a);
+}
+
+test "kmeans++ initialization spreads separated centroids" {
+    const dim: usize = 2;
+    const n: usize = 4;
+    const k: usize = 2;
+    const data = [_]f32{
+        0.0, 0.0,
+        0.01, 0.0,
+        10.0, 10.0,
+        10.01, 10.0,
+    };
+    var centroids: [k * dim]f32 = undefined;
+    try initPlusPlus(testing.allocator, &data, n, dim, k, 0xdeadbeef_cafebabe, &centroids);
+
+    const dx = centroids[0] - centroids[2];
+    const dy = centroids[1] - centroids[3];
+    try testing.expect(dx * dx + dy * dy > 100.0);
 }
 
 test "topNCentroids returns sorted closest" {
