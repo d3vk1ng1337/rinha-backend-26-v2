@@ -225,7 +225,7 @@ fn searchTop5(reader: *const Reader, query: *const [dims]f32, comptime nprobe_fa
             markScanned(&scanned, ci);
             continue;
         }
-        scanCluster(reader, ci, &q16, &top);
+        scanCluster(reader, ci, query, &top);
         markScanned(&scanned, ci);
     }
 
@@ -235,7 +235,7 @@ fn searchTop5(reader: *const Reader, query: *const [dims]f32, comptime nprobe_fa
     }
 
     if (fraud_count == 2 or fraud_count == 3) {
-        scanBboxFallback(reader, &q16, &scanned, &top);
+        scanBboxFallback(reader, query, &q16, &scanned, &top);
     }
 
     return top;
@@ -257,14 +257,11 @@ fn searchTop5TwoTier(
 
     findNearestProbes(reader, query, nprobe_full, &probe_d, &probe_i);
 
-    var q16: [dims]i16 = undefined;
-    quantize16(query, &q16);
-
     var top = Top5{};
     inline for (0..nprobe_fast) |pi| {
         const pc = probe_i[pi];
         if (pc != std.math.maxInt(u32)) {
-            scanCluster(reader, pc, &q16, &top);
+            scanCluster(reader, pc, query, &top);
         }
     }
 
@@ -277,7 +274,7 @@ fn searchTop5TwoTier(
         inline for (nprobe_fast..nprobe_full) |pi| {
             const pc = probe_i[pi];
             if (pc != std.math.maxInt(u32)) {
-                scanCluster(reader, pc, &q16, &top);
+                scanCluster(reader, pc, query, &top);
             }
         }
     }
@@ -337,19 +334,20 @@ fn findNearestProbes(
     }
 }
 
-fn scanCluster(reader: *const Reader, c: usize, q: *const [dims]i16, top: *Top5) void {
+fn scanCluster(reader: *const Reader, c: usize, query: *const [dims]f32, top: *Top5) void {
     const start: usize = @intCast(reader.block_offsets[c]);
     const end: usize = @intCast(reader.block_offsets[c + 1]);
     var b = start;
     while (b < end) : (b += 1) {
         const label_base = b * block_size;
         const block_base = b * dims * block_size;
-        scanBlockQ16(q, reader.blocks[block_base..], reader.labels[label_base..][0..block_size], top);
+        scanBlockF32(query, reader.blocks[block_base..], reader.labels[label_base..][0..block_size], top);
     }
 }
 
 fn scanBboxFallback(
     reader: *const Reader,
+    query: *const [dims]f32,
     q: *const [dims]i16,
     scanned: *const [max_clusters / 64]u64,
     top: *Top5,
@@ -364,44 +362,37 @@ fn scanBboxFallback(
             const ci = c + lane;
             if (isScanned(scanned, ci)) continue;
             if (lb[lane] >= cutoff) continue;
-            scanCluster(reader, ci, q, top);
+            scanCluster(reader, ci, query, top);
         }
     }
 
     while (c < k) : (c += 1) {
         if (isScanned(scanned, c)) continue;
         if (bboxLowerBoundF32(reader, c, q) >= top.worst()) continue;
-        scanCluster(reader, c, q, top);
+        scanCluster(reader, c, query, top);
     }
 }
 
-inline fn scanBlockQ16(
-    q: *const [dims]i16,
+inline fn scanBlockF32(
+    query: *const [dims]f32,
     block: []align(2) const i16,
     labels: *const [block_size]u8,
     top: *Top5,
 ) void {
     const cutoff_vec: F32x8 = @splat(top.worst());
-    var acc0: I32x8 = @splat(0);
-    var acc1: I32x8 = @splat(0);
-    var acc2: I32x8 = @splat(0);
-    var acc3: I32x8 = @splat(0);
+    var acc: F32x8 = @splat(0);
 
-    accumDimsQ16(q, block, &acc0, 0, 4);
-    var scaled = scaledQ16Dist(acc0);
-    if (allGE(scaled, cutoff_vec)) return;
+    accumDims(query, block, &acc, 0, 4);
+    if (allGE(acc, cutoff_vec)) return;
 
-    accumDimsQ16(q, block, &acc1, 4, 8);
-    scaled += scaledQ16Dist(acc1);
-    if (allGE(scaled, cutoff_vec)) return;
+    accumDims(query, block, &acc, 4, 6);
+    if (allGE(acc, cutoff_vec)) return;
 
-    accumDimsQ16(q, block, &acc2, 8, 12);
-    scaled += scaledQ16Dist(acc2);
-    if (allGE(scaled, cutoff_vec)) return;
+    accumDims(query, block, &acc, 6, 8);
+    if (allGE(acc, cutoff_vec)) return;
 
-    accumDimsQ16(q, block, &acc3, 12, dims);
-    scaled += scaledQ16Dist(acc3);
-    const dists: [block_size]f32 = scaled;
+    accumDims(query, block, &acc, 8, dims);
+    const dists: [block_size]f32 = acc;
     inline for (0..block_size) |slot| {
         top.insert(dists[slot], labels[slot]);
     }
@@ -429,10 +420,10 @@ inline fn bboxLowerBoundVec8(reader: *const Reader, c: usize, q: *const [dims]i1
     return acc;
 }
 
-inline fn accumDimsQ16(
-    q: *const [dims]i16,
+inline fn accumDims(
+    query: *const [dims]f32,
     block: []align(2) const i16,
-    acc: *I32x8,
+    acc: *F32x8,
     comptime start: usize,
     comptime end: usize,
 ) void {
@@ -440,13 +431,11 @@ inline fn accumDimsQ16(
     inline while (d < end) : (d += 1) {
         const lanes_i16: I16x8 = block[d * block_size ..][0..block_size].*;
         const lanes_i32: I32x8 = @intCast(lanes_i16);
-        const diff = lanes_i32 - @as(I32x8, @splat(@as(i32, q[d])));
+        const lanes_f32: F32x8 = @floatFromInt(lanes_i32);
+        const v = lanes_f32 * @as(F32x8, @splat(q16_scale));
+        const diff = v - @as(F32x8, @splat(query[d]));
         acc.* += diff * diff;
     }
-}
-
-inline fn scaledQ16Dist(acc: I32x8) F32x8 {
-    return @as(F32x8, @floatFromInt(acc)) * @as(F32x8, @splat(q16_dist_scale));
 }
 
 inline fn allGE(acc: F32x8, cutoff: F32x8) bool {
