@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1.7
+FROM alpine:3.20 AS build
+ARG TARGETARCH
+ARG ZIG_VERSION=0.16.0
+RUN apk add --no-cache curl xz
+RUN case "${TARGETARCH}" in \
+        arm64) ZIG_ARCH=aarch64 ;; \
+        amd64|*) ZIG_ARCH=x86_64 ;; \
+    esac && \
+    curl -fsSL https://ziglang.org/download/${ZIG_VERSION}/zig-${ZIG_ARCH}-linux-${ZIG_VERSION}.tar.xz \
+    | tar -xJ -C /opt && mv /opt/zig-* /opt/zig
+ENV PATH="/opt/zig:${PATH}"
+
+WORKDIR /src
+COPY build.zig build.zig.zon ./
+COPY src ./src
+COPY cmd ./cmd
+RUN case "${TARGETARCH}" in \
+        arm64) zig build -Doptimize=ReleaseFast -Dtarget=aarch64-linux-musl ;; \
+        amd64|*) zig build -Doptimize=ReleaseFast -Dtarget=x86_64-linux-musl -Dcpu=haswell ;; \
+    esac
+
+FROM alpine:3.20
+COPY --from=build /src/zig-out/bin/lb /usr/local/bin/lb
+EXPOSE 9999
+ENTRYPOINT ["/usr/local/bin/lb"]

@@ -8,6 +8,9 @@ data/references.json.gz
 data/index.bin
 deploy/index.bin
 
+# Local bench fixtures
+test/test-data.json
+
 # OS
 .DS_Store
 *.swp

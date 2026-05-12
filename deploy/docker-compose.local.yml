@@ -1,0 +1,92 @@
+services:
+  builder:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.builder.local
+    image: rinha26-builder:local
+    volumes:
+      - ../data:/data:ro
+      - index:/index
+    command: ["/data/references.json.gz", "/index/index.bin"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "1024M"
+
+  api1:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api.local
+    image: rinha26-api:local
+    volumes:
+      - index:/index:ro
+      - sockets:/sockets
+    command: ["/sockets/api1.sock", "/index/index.bin", "1"]
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.42"
+          memory: "160M"
+
+  api2:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api.local
+    image: rinha26-api:local
+    volumes:
+      - index:/index:ro
+      - sockets:/sockets
+    command: ["/sockets/api2.sock", "/index/index.bin", "1"]
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.42"
+          memory: "160M"
+
+  lb:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.lb.local
+    image: rinha26-lb:local
+    command: ["0.0.0.0:9999", "/sockets/api1.sock", "/sockets/api2.sock"]
+    volumes:
+      - sockets:/sockets:ro
+    ports:
+      - "3456:9999"
+    depends_on:
+      - api1
+      - api2
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    deploy:
+      resources:
+        limits:
+          cpus: "0.16"
+          memory: "30M"
+
+volumes:
+  index:
+  sockets:
