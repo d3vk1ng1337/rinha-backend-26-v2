@@ -207,21 +207,10 @@ const Top5 = struct {
 
 fn searchTop5(reader: *const Reader, query: *const [dims]f32, comptime nprobe_fast: usize) Top5 {
     comptime std.debug.assert(nprobe_fast > 0);
-    const k: usize = @intCast(reader.k);
-
     var probe_d: [nprobe_fast]f32 = .{std.math.inf(f32)} ** nprobe_fast;
     var probe_i: [nprobe_fast]u32 = .{std.math.maxInt(u32)} ** nprobe_fast;
 
-    var c: usize = 0;
-    while (c < k) : (c += 1) {
-        var cd: f32 = 0;
-        comptime var d: usize = 0;
-        inline while (d < dims) : (d += 1) {
-            const diff = reader.centroidAt(d, c) - query[d];
-            cd += diff * diff;
-        }
-        insertProbe(nprobe_fast, &probe_d, &probe_i, cd, @intCast(c));
-    }
+    findNearestProbes(reader, query, nprobe_fast, &probe_d, &probe_i);
 
     var q16: [dims]i16 = undefined;
     quantize16(query, &q16);
@@ -263,21 +252,10 @@ fn searchTop5TwoTier(
         std.debug.assert(nprobe_full >= nprobe_fast);
         std.debug.assert(nprobe_full <= max_clusters);
     }
-    const k: usize = @intCast(reader.k);
-
     var probe_d: [nprobe_full]f32 = .{std.math.inf(f32)} ** nprobe_full;
     var probe_i: [nprobe_full]u32 = .{std.math.maxInt(u32)} ** nprobe_full;
 
-    var c: usize = 0;
-    while (c < k) : (c += 1) {
-        var cd: f32 = 0;
-        comptime var d: usize = 0;
-        inline while (d < dims) : (d += 1) {
-            const diff = reader.centroidAt(d, c) - query[d];
-            cd += diff * diff;
-        }
-        insertProbe(nprobe_full, &probe_d, &probe_i, cd, @intCast(c));
-    }
+    findNearestProbes(reader, query, nprobe_full, &probe_d, &probe_i);
 
     var top = Top5{};
     inline for (0..nprobe_fast) |pi| {
@@ -319,6 +297,41 @@ fn insertProbe(
     }
     probe_d[pos] = d;
     probe_i[pos] = i;
+}
+
+fn findNearestProbes(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    comptime nprobe_fast: usize,
+    probe_d: *[nprobe_fast]f32,
+    probe_i: *[nprobe_fast]u32,
+) void {
+    const k: usize = @intCast(reader.k);
+
+    var c: usize = 0;
+    while (c + block_size <= k) : (c += block_size) {
+        var cd: F32x8 = @splat(0);
+        comptime var d: usize = 0;
+        inline while (d < dims) : (d += 1) {
+            const cent: F32x8 = reader.centroids[d * k + c ..][0..block_size].*;
+            const diff = cent - @as(F32x8, @splat(query[d]));
+            cd += diff * diff;
+        }
+        const dists: [block_size]f32 = cd;
+        inline for (0..block_size) |lane| {
+            insertProbe(nprobe_fast, probe_d, probe_i, dists[lane], @intCast(c + lane));
+        }
+    }
+
+    while (c < k) : (c += 1) {
+        var cd: f32 = 0;
+        comptime var d: usize = 0;
+        inline while (d < dims) : (d += 1) {
+            const diff = reader.centroidAt(d, c) - query[d];
+            cd += diff * diff;
+        }
+        insertProbe(nprobe_fast, probe_d, probe_i, cd, @intCast(c));
+    }
 }
 
 fn scanCluster(reader: *const Reader, c: usize, query: *const [dims]f32, top: *Top5) void {
