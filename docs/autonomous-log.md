@@ -128,3 +128,12 @@ Próximo passo: trocar LB Zig custom por nginx.
   - **CPU split**: api/api/lb de 0.42/0.42/0.16 para **0.45/0.45/0.10** (matching top1; LB só faz fd-pass).
 - Bench local k6 (4 runs limpos): p99 1.08-2.21ms (variance OrbStack), score min/median/max 5655/5763/5968, FP=FN=err=0. Melhor run (5968) já bem perto de top1 5976.81.
 - 2026-05-13 09:30Z: submission branch atualizada com `sha-32789b104a76e6c845a81e9709c7abbc89e622ae` (commit 6826c82). Issue **#4015** aberta na rinha oficial.
+- 2026-05-13 09:51Z: #4015 fechado. **p99 1.17ms, FP=FN=err=0, final_score 5931.39** — saímos de 5786.89 (#3425) para 5931.39, gap pra top1 (5976.81) caiu para ~45pts (dentro da variance ±50).
+
+## Iteração 11 — fast5/full40/adaptive{2..4} + bbox prune adaptive
+
+- 2026-05-13 09:47Z: H20. Eval offline com i16 centroids encontrou config melhor: **fast=5/full=40/adaptive{2..4}** preserva weighted_E=0 e cai de 11.56us para 8.14us no mean search.
+  - fast=5 (vs 4) catch mais cases no fast tier — count=1/count=5 ficam decisivos sem fallback
+  - adaptive {2..4} (vs {1..4}) exclui count=1 e count=5, que com fast=5 já são confiáveis
+  - full=40 (vs 48) encolhe o heap top-N do findNearestProbes e cada fallback faz só 35 scans em vez de 44
+- 2026-05-13 09:51Z: H21. **bbox prune no fallback adaptativo**: quando adaptive dispara, cada cluster candidato é gatado pelo mesmo lower-bound do bbox que searchTop5 já usa. Eval offline cai mais 0.32us (7.82us mean total) sem perder E=0. Bbox compare é ~50ns/cluster e poda fração significativa dos scans.
