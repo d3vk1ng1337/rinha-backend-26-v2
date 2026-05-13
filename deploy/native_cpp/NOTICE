@@ -1,0 +1,11 @@
+native_cpp/src/* is a verbatim copy of files from
+https://github.com/luanlouzada/rinha_backend2026 (MIT-licensed).
+
+The upstream sources are:
+  - src/server.cpp
+  - src/build_index.cpp
+  - src/index.hpp
+  - src/fd_lb.c
+
+These are vendored unmodified to make it cheap to reproduce the reference
+top1 setup as an alternative API/LB build (see deploy/Dockerfile.native).

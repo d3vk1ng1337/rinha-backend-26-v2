@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1.7
+# Native C++ port of luanlouzada/rinha_backend2026 (MIT). Ships server + fd-lb
+# binaries plus a pre-built index in a single image; pick which to run via the
+# compose command.
+
+FROM --platform=linux/amd64 gcc:16 AS builder
+WORKDIR /src
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends zlib1g-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY deploy/native_cpp/src ./src
+COPY data/references.json.gz /tmp/references.json.gz
+RUN mkdir -p /out /index \
+    && g++ -O3 -DNDEBUG -std=c++20 -march=haswell -mtune=haswell -mavx2 -mfma -flto -fopenmp src/build_index.cpp -lz -o /out/build-index \
+    && g++ -Ofast -DNDEBUG -std=c++20 -march=haswell -mtune=haswell -mavx2 -mfma -flto -fno-exceptions -fno-rtti -pthread -static-libstdc++ -static-libgcc src/server.cpp -o /out/server \
+    && gcc -O3 -DNDEBUG -std=c11 -march=haswell -mtune=haswell -flto -static -s src/fd_lb.c -o /out/fd-lb
+RUN /out/build-index /tmp/references.json.gz /index/index.bin 1280 65536 6 \
+    && ls -lh /index/index.bin
+
+FROM --platform=linux/amd64 debian:trixie-slim AS runtime
+COPY --from=builder /out/server /usr/local/bin/server
+COPY --from=builder /out/fd-lb /usr/local/bin/fd-lb
+COPY --from=builder /index /index
+RUN chmod 0755 /usr/local/bin/server /usr/local/bin/fd-lb
+ENV INDEX_MMAP=1 MALLOC_ARENA_MAX=1 PATH=/usr/local/bin:/usr/bin:/bin
+CMD ["server"]
