@@ -118,3 +118,13 @@ Próximo passo: trocar LB Zig custom por nginx.
 - H17 preparado em branch experimental: LB Zig convertido para FD-passing; API mantém o listener UDS antigo e adiciona `api.sock.ctrl` para receber FDs. Build/test local e build Linux/musl passam; próximo critério é CI k6 oficial antes de mexer na `submission`.
 - 2026-05-12 00:04Z: #3425 fechado. FD-passing oficial teve **p99 1.63ms**, FP=0/FN=0, HTTP errors=0, score **5786.89**. Ganho real, mas pequeno: LB não é mais gargalo dominante.
 - H18 em preparação (`top1-hotpath`): SIMD no filtro bbox do fallback borderline e parser decimal manual para remover `std.fmt.parseFloat/parseInt` do hot path. Eval offline preserva **weighted_E=0**; `prod_fast12_bbox_all` médio ~32.99us após mudanças.
+
+## Iteração 10 — int16 centroids + adaptive {1..4}
+
+- 2026-05-13 09:20Z: H19 implementado em `main` (commit 32789b1). Mudanças:
+  - **Centroid SoA de f32 → i16** (q16 scale, ×10000). Index format v1 → v2. SoA encolhe de 229KB para 115KB — cabe no L2 do Mac Mini com folga.
+  - **`findNearestProbes` kernel inteiro**: load i16x8, sub i16x8, widen i32x8, square, acumula u32 separando dims 0..7 e 8..13 para evitar overflow u32 antes do u64 final. LLVM deve casar com `madd_epi16` em amd64/haswell.
+  - **Defaults two-tier**: `fast=8/full=48/trigger{2,3}` → `fast=4/full=48/trigger{1..4}`. Eval offline mantém weighted_E=0 e cai de mean ~33us para **~9us**.
+  - **CPU split**: api/api/lb de 0.42/0.42/0.16 para **0.45/0.45/0.10** (matching top1; LB só faz fd-pass).
+- Bench local k6 (4 runs limpos): p99 1.08-2.21ms (variance OrbStack), score min/median/max 5655/5763/5968, FP=FN=err=0. Melhor run (5968) já bem perto de top1 5976.81.
+- 2026-05-13 09:30Z: submission branch atualizada com `sha-32789b104a76e6c845a81e9709c7abbc89e622ae` (commit 6826c82). Issue **#4015** aberta na rinha oficial.
