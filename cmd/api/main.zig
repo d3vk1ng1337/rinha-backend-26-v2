@@ -164,8 +164,8 @@ fn parseRequest(buf: []const u8) struct { status: ParseStatus, req: ParsedReques
     };
 }
 
-const conn_pool_size: usize = 256;
-const ring_entries: u16 = 1024;
+const conn_pool_size: usize = 512;
+const ring_entries: u16 = 2048;
 const uring_setup_flags: u32 = linux.IORING_SETUP_SINGLE_ISSUER | linux.IORING_SETUP_COOP_TASKRUN;
 const scratch_bytes: usize = 8 * 1024;
 const fd_queue_size: usize = conn_pool_size * 2;
