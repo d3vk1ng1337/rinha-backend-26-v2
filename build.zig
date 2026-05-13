@@ -108,6 +108,27 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(eval_block);
 
+    const dump_module = b.createModule(.{
+        .root_source_file = b.path("cmd/dump_worst_dist/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    dump_module.addAnonymousImport("lib", .{
+        .root_source_file = lib_path,
+        .target = target,
+        .optimize = optimize,
+    });
+    const dump_worst_dist = b.addExecutable(.{
+        .name = "dump_worst_dist",
+        .root_module = dump_module,
+    });
+    b.installArtifact(dump_worst_dist);
+
+    const run_dump = b.addRunArtifact(dump_worst_dist);
+    if (b.args) |args| run_dump.addArgs(args);
+    b.step("run-dump-worst-dist", "Dump fast-tier worst_dist per query").dependOn(&run_dump.step);
+
     const run_api = b.addRunArtifact(api);
     if (b.args) |args| run_api.addArgs(args);
     b.step("run-api", "Run the API binary").dependOn(&run_api.step);

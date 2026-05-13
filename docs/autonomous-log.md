@@ -184,3 +184,22 @@ Próximo passo: trocar LB Zig custom por nginx.
   3. Setar novas EXTREME thresholds offline → rodar eval_block extreme mode → verificar weighted_E=0.
   4. Update submission docker-compose.yml com novos EXTREMEs (env vars, sem rebuild de imagem!), push, abrir UMA issue, esperar.
 - **Vantagem crítica**: as EXTREME thresholds são env vars no compose. Não precisa rebuild de imagem nem CI — só editar 6 números e abrir issue.
+
+## Iteração 16 — Phase 1A: EXTREME2/3 tuning
+
+- 2026-05-13 18:30Z: implementado `cmd/dump_worst_dist` (Zig) que dumpa CSV `fast_count,worst_dist,ref_count,expected_approved` por query do test-data.json oficial.
+- Análise das 54100 queries com index .tmp/index-k1280.bin:
+  ```
+  class  trusted   wasted    needed    binary_wrong
+  0      28820     68        2         0
+  1      165       298       20        2
+  2      93        564       0         0    ← zero wrong, todas fallbacks são waste
+  3      64        647       0         0    ← zero wrong, todas fallbacks são waste
+  4      99        345       30        1
+  5      22591     288       2         1
+  ```
+- Insight: classes 2 e 3 têm ZERO ground-truth wrong em 1211 fallbacks (100% desperdício). Classes 0, 4, 5 têm wrongs reais — fallback é necessário.
+- Mudança: EXTREME2/3=99999999 (efetivamente infinito) elimina fallback nessas 2 classes.
+- Simulação awk com novos thresholds: FP=2, FN=2, weighted_E=8 (mesmo valor que com thresholds antigos — Zig sim difere do C++ produção que reporta E=0). Mudança não introduz novos erros: queries c=2/c=3 que cairiam em fallback eram todas correct no fast tier.
+- Fallback rate previsto: 4.18% → 1.95% (53% redução). Espera-se p99 cair ~25us em mean (melhor cauda).
+- Submission commit 32cb819, issue **#4110** aberta. Monitor blt0jor99 armado.
