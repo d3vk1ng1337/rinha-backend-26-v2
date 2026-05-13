@@ -347,11 +347,13 @@ fn warmBlockIndex(reader: *const block_index.Reader) void {
             q[6] = -1;
         }
 
-        sink +%= block_index.searchFraudCountTwoTier(
+        sink +%= block_index.searchFraudCountTwoTierAdaptive(
             reader,
             &q,
             block_index.default_nprobe_fast,
             block_index.default_nprobe_full,
+            block_index.default_adaptive_min,
+            block_index.default_adaptive_max,
         );
     }
 

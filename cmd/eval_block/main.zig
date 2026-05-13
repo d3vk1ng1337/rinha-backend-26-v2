@@ -5,18 +5,23 @@ const fast_parser = lib.fast_parser;
 
 const dim = block_index.dims;
 const variants = [_]Variant{
-    .{ .name = "prod_fast8_full48", .mode = .two_tier, .fast = 8, .full = 48 },
-    .{ .name = "legacy_fast12_bbox_all", .mode = .bbox_all, .fast = 12, .full = 0 },
-    .{ .name = "fast12_full24", .mode = .two_tier, .fast = 12, .full = 24 },
-    .{ .name = "fast5_full32", .mode = .two_tier, .fast = 5, .full = 32 },
-    .{ .name = "fast8_full32", .mode = .two_tier, .fast = 8, .full = 32 },
-    .{ .name = "fast12_full32", .mode = .two_tier, .fast = 12, .full = 32 },
-    .{ .name = "fast5_full48", .mode = .two_tier, .fast = 5, .full = 48 },
-    .{ .name = "fast8_full48", .mode = .two_tier, .fast = 8, .full = 48 },
-    .{ .name = "fast12_full48", .mode = .two_tier, .fast = 12, .full = 48 },
-    .{ .name = "fast5_full64", .mode = .two_tier, .fast = 5, .full = 64 },
-    .{ .name = "fast8_full64", .mode = .two_tier, .fast = 8, .full = 64 },
-    .{ .name = "fast12_full64", .mode = .two_tier, .fast = 12, .full = 64 },
+    .{ .name = "prod_fast8_full48_a23", .mode = .two_tier, .fast = 8, .full = 48, .amin = 2, .amax = 3 },
+    .{ .name = "fast4_full48_a14", .mode = .two_tier, .fast = 4, .full = 48, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full40_a14", .mode = .two_tier, .fast = 4, .full = 40, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full36_a14", .mode = .two_tier, .fast = 4, .full = 36, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full32_a14", .mode = .two_tier, .fast = 4, .full = 32, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full28_a14", .mode = .two_tier, .fast = 4, .full = 28, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full24_a14", .mode = .two_tier, .fast = 4, .full = 24, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full20_a14", .mode = .two_tier, .fast = 4, .full = 20, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full16_a14", .mode = .two_tier, .fast = 4, .full = 16, .amin = 1, .amax = 4 },
+    .{ .name = "fast5_full48_a14", .mode = .two_tier, .fast = 5, .full = 48, .amin = 1, .amax = 4 },
+    .{ .name = "fast6_full48_a14", .mode = .two_tier, .fast = 6, .full = 48, .amin = 1, .amax = 4 },
+    .{ .name = "fast8_full48_a14", .mode = .two_tier, .fast = 8, .full = 48, .amin = 1, .amax = 4 },
+    .{ .name = "fast4_full40_a13", .mode = .two_tier, .fast = 4, .full = 40, .amin = 1, .amax = 3 },
+    .{ .name = "fast4_full48_a13", .mode = .two_tier, .fast = 4, .full = 48, .amin = 1, .amax = 3 },
+    .{ .name = "fast4_full40_a24", .mode = .two_tier, .fast = 4, .full = 40, .amin = 2, .amax = 4 },
+    .{ .name = "fast4_full48_a24", .mode = .two_tier, .fast = 4, .full = 48, .amin = 2, .amax = 4 },
+    .{ .name = "fast4_full32_a24", .mode = .two_tier, .fast = 4, .full = 32, .amin = 2, .amax = 4 },
 };
 
 const Variant = struct {
@@ -26,6 +31,8 @@ const Variant = struct {
     mode: Mode,
     fast: usize,
     full: usize,
+    amin: u8 = 2,
+    amax: u8 = 3,
 };
 
 const Hist = struct {
@@ -92,7 +99,7 @@ pub fn main(init: std.process.Init) !void {
             const t0 = std.Io.Clock.Timestamp.now(io, .awake);
             const count = switch (variant.mode) {
                 .bbox_all => block_index.searchFraudCount(&reader, &f, variant.fast),
-                .two_tier => block_index.searchFraudCountTwoTier(&reader, &f, variant.fast, variant.full),
+                .two_tier => block_index.searchFraudCountTwoTierAdaptive(&reader, &f, variant.fast, variant.full, variant.amin, variant.amax),
             };
             const t1 = std.Io.Clock.Timestamp.now(io, .awake);
             hists[vi].search_time_ns += t0.durationTo(t1).raw.nanoseconds;

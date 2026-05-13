@@ -36,18 +36,18 @@ pub fn main(init: std.process.Init) !void {
     try kmeans.cluster(ally, floats, n, dim, num_centroids, kmeans_iters, centroids_aos, assignments);
     std.log.info("builder: k-means done", .{});
 
-    const centroids_soa = try ally.alloc(f32, num_centroids * dim);
+    const centroids_soa = try ally.alloc(i16, num_centroids * dim);
     {
         var d: usize = 0;
         while (d < dim) : (d += 1) {
             var c: usize = 0;
             while (c < num_centroids) : (c += 1) {
-                centroids_soa[d * num_centroids + c] = centroids_aos[c * dim + d];
+                centroids_soa[d * num_centroids + c] = quantizeCentroid(centroids_aos[c * dim + d]);
             }
         }
     }
     ally.free(centroids_aos);
-    std.log.info("builder: centroids transposed to SoA", .{});
+    std.log.info("builder: centroids transposed to i16 SoA", .{});
 
     const cluster_counts = try ally.alloc(u32, num_centroids);
     @memset(cluster_counts, 0);
@@ -143,6 +143,16 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn quantize16(v_raw: f32) i16 {
+    var v = v_raw;
+    if (v < -1) v = -1;
+    if (v > 1) v = 1;
+    return if (v >= 0)
+        @intFromFloat(v * 10000.0 + 0.5)
+    else
+        @intFromFloat(v * 10000.0 - 0.5);
+}
+
+fn quantizeCentroid(v_raw: f32) i16 {
     var v = v_raw;
     if (v < -1) v = -1;
     if (v > 1) v = 1;

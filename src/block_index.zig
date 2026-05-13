@@ -4,9 +4,11 @@ pub const dims: usize = 14;
 pub const block_size: usize = 8;
 pub const header_size: usize = 64;
 pub const magic: u64 = 0x3256_4949_484E_4952;
-pub const version: u32 = 1;
-pub const default_nprobe_fast: usize = 8;
+pub const version: u32 = 2;
+pub const default_nprobe_fast: usize = 4;
 pub const default_nprobe_full: usize = 48;
+pub const default_adaptive_min: u8 = 1;
+pub const default_adaptive_max: u8 = 4;
 pub const max_clusters: usize = 16_384;
 const q16_scale: f32 = 0.0001;
 const q16_dist_scale: f32 = 1e-8;
@@ -19,7 +21,7 @@ pub const Reader = struct {
     n: u32,
     k: u32,
     total_blocks: u32,
-    centroids: []align(4) const f32,
+    centroids: []align(2) const i16,
     bbox_min: []align(2) const i16,
     bbox_max: []align(2) const i16,
     block_offsets: []align(4) const u32,
@@ -43,7 +45,7 @@ pub const Reader = struct {
         const blocks_usize: usize = @intCast(total_blocks);
 
         var off: usize = header_size;
-        const cent_bytes_len = k_usize * dims * @sizeOf(f32);
+        const cent_bytes_len = k_usize * dims * @sizeOf(i16);
         const bbox_bytes_len = k_usize * dims * @sizeOf(i16);
         const offsets_bytes_len = (k_usize + 1) * @sizeOf(u32);
         const labels_bytes_len = blocks_usize * block_size;
@@ -51,8 +53,8 @@ pub const Reader = struct {
         const expected = off + cent_bytes_len + 2 * bbox_bytes_len + offsets_bytes_len + labels_bytes_len + blocks_bytes_len;
         if (bytes.len < expected) return error.TooShort;
 
-        const cent_bytes: []align(4) const u8 = @alignCast(bytes[off .. off + cent_bytes_len]);
-        const centroids = std.mem.bytesAsSlice(f32, cent_bytes);
+        const cent_bytes: []align(2) const u8 = @alignCast(bytes[off .. off + cent_bytes_len]);
+        const centroids = std.mem.bytesAsSlice(i16, cent_bytes);
         off += cent_bytes_len;
 
         const bmin_bytes: []align(2) const u8 = @alignCast(bytes[off .. off + bbox_bytes_len]);
@@ -63,6 +65,7 @@ pub const Reader = struct {
         const bbox_max = std.mem.bytesAsSlice(i16, bmax_bytes);
         off += bbox_bytes_len;
 
+        off = std.mem.alignForward(usize, off, @alignOf(u32));
         const offset_bytes: []align(4) const u8 = @alignCast(bytes[off .. off + offsets_bytes_len]);
         const block_offsets = std.mem.bytesAsSlice(u32, offset_bytes);
         off += offsets_bytes_len;
@@ -70,6 +73,7 @@ pub const Reader = struct {
         const labels = bytes[off .. off + labels_bytes_len];
         off += labels_bytes_len;
 
+        off = std.mem.alignForward(usize, off, @alignOf(i16));
         const block_bytes: []align(2) const u8 = @alignCast(bytes[off .. off + blocks_bytes_len]);
         const blocks = std.mem.bytesAsSlice(i16, block_bytes);
 
@@ -89,7 +93,7 @@ pub const Reader = struct {
         };
     }
 
-    pub inline fn centroidAt(self: *const Reader, d: usize, c: usize) f32 {
+    pub inline fn centroidAt(self: *const Reader, d: usize, c: usize) i16 {
         return self.centroids[d * @as(usize, @intCast(self.k)) + c];
     }
 
@@ -106,7 +110,7 @@ pub const WriteParams = struct {
     n: u64,
     k: usize,
     total_blocks: usize,
-    centroids: []const f32,
+    centroids: []const i16,
     bbox_min: []const i16,
     bbox_max: []const i16,
     block_offsets: []const u32,
@@ -135,15 +139,17 @@ pub fn writeAll(file: std.Io.File, io: std.Io, p: WriteParams) !void {
     try file.writePositionalAll(io, header[0..], off);
     off += header_size;
     try file.writePositionalAll(io, std.mem.sliceAsBytes(p.centroids), off);
-    off += @as(u64, @intCast(p.centroids.len * @sizeOf(f32)));
+    off += @as(u64, @intCast(p.centroids.len * @sizeOf(i16)));
     try file.writePositionalAll(io, std.mem.sliceAsBytes(p.bbox_min), off);
     off += @as(u64, @intCast(p.bbox_min.len * @sizeOf(i16)));
     try file.writePositionalAll(io, std.mem.sliceAsBytes(p.bbox_max), off);
     off += @as(u64, @intCast(p.bbox_max.len * @sizeOf(i16)));
+    off = std.mem.alignForward(u64, off, @alignOf(u32));
     try file.writePositionalAll(io, std.mem.sliceAsBytes(p.block_offsets), off);
     off += @as(u64, @intCast(p.block_offsets.len * @sizeOf(u32)));
     try file.writePositionalAll(io, p.labels, off);
     off += @as(u64, @intCast(p.labels.len));
+    off = std.mem.alignForward(u64, off, @alignOf(i16));
     try file.writePositionalAll(io, std.mem.sliceAsBytes(p.blocks), off);
 
     try file.sync(io);
@@ -177,7 +183,18 @@ pub fn searchFraudCountTwoTier(
     comptime nprobe_fast: usize,
     comptime nprobe_full: usize,
 ) u8 {
-    const top = searchTop5TwoTier(reader, query, nprobe_fast, nprobe_full);
+    return searchFraudCountTwoTierAdaptive(reader, query, nprobe_fast, nprobe_full, 2, 3);
+}
+
+pub fn searchFraudCountTwoTierAdaptive(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    comptime nprobe_fast: usize,
+    comptime nprobe_full: usize,
+    comptime adaptive_min: u8,
+    comptime adaptive_max: u8,
+) u8 {
+    const top = searchTop5TwoTierAdaptive(reader, query, nprobe_fast, nprobe_full, adaptive_min, adaptive_max);
     var count: u8 = 0;
     for (top.labels) |label| {
         if (label == 1) count += 1;
@@ -207,13 +224,12 @@ const Top5 = struct {
 
 fn searchTop5(reader: *const Reader, query: *const [dims]f32, comptime nprobe_fast: usize) Top5 {
     comptime std.debug.assert(nprobe_fast > 0);
-    var probe_d: [nprobe_fast]f32 = .{std.math.inf(f32)} ** nprobe_fast;
-    var probe_i: [nprobe_fast]u32 = .{std.math.maxInt(u32)} ** nprobe_fast;
-
-    findNearestProbes(reader, query, nprobe_fast, &probe_d, &probe_i);
-
     var q16: [dims]i16 = undefined;
     quantize16(query, &q16);
+
+    var probe_d: [nprobe_fast]u64 = .{std.math.maxInt(u64)} ** nprobe_fast;
+    var probe_i: [nprobe_fast]u32 = .{std.math.maxInt(u32)} ** nprobe_fast;
+    findNearestProbes(reader, &q16, nprobe_fast, &probe_d, &probe_i);
 
     var top = Top5{};
     var scanned: [max_clusters / 64]u64 = .{0} ** (max_clusters / 64);
@@ -247,18 +263,29 @@ fn searchTop5TwoTier(
     comptime nprobe_fast: usize,
     comptime nprobe_full: usize,
 ) Top5 {
+    return searchTop5TwoTierAdaptive(reader, query, nprobe_fast, nprobe_full, 2, 3);
+}
+
+fn searchTop5TwoTierAdaptive(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    comptime nprobe_fast: usize,
+    comptime nprobe_full: usize,
+    comptime adaptive_min: u8,
+    comptime adaptive_max: u8,
+) Top5 {
     comptime {
         std.debug.assert(nprobe_fast > 0);
         std.debug.assert(nprobe_full >= nprobe_fast);
         std.debug.assert(nprobe_full <= max_clusters);
+        std.debug.assert(adaptive_min <= adaptive_max);
     }
-    var probe_d: [nprobe_full]f32 = .{std.math.inf(f32)} ** nprobe_full;
-    var probe_i: [nprobe_full]u32 = .{std.math.maxInt(u32)} ** nprobe_full;
-
-    findNearestProbes(reader, query, nprobe_full, &probe_d, &probe_i);
-
     var q16: [dims]i16 = undefined;
     quantize16(query, &q16);
+
+    var probe_d: [nprobe_full]u64 = .{std.math.maxInt(u64)} ** nprobe_full;
+    var probe_i: [nprobe_full]u32 = .{std.math.maxInt(u32)} ** nprobe_full;
+    findNearestProbes(reader, &q16, nprobe_full, &probe_d, &probe_i);
 
     var top = Top5{};
     inline for (0..nprobe_fast) |pi| {
@@ -273,7 +300,7 @@ fn searchTop5TwoTier(
         if (label == 1) fraud_count += 1;
     }
 
-    if (fraud_count == 2 or fraud_count == 3) {
+    if (fraud_count >= adaptive_min and fraud_count <= adaptive_max) {
         inline for (nprobe_fast..nprobe_full) |pi| {
             const pc = probe_i[pi];
             if (pc != std.math.maxInt(u32)) {
@@ -287,9 +314,9 @@ fn searchTop5TwoTier(
 
 fn insertProbe(
     comptime nprobe_fast: usize,
-    probe_d: *[nprobe_fast]f32,
+    probe_d: *[nprobe_fast]u64,
     probe_i: *[nprobe_fast]u32,
-    d: f32,
+    d: u64,
     i: u32,
 ) void {
     if (d >= probe_d[nprobe_fast - 1]) return;
@@ -304,24 +331,44 @@ fn insertProbe(
 
 fn findNearestProbes(
     reader: *const Reader,
-    query: *const [dims]f32,
+    q16: *const [dims]i16,
     comptime nprobe_fast: usize,
-    probe_d: *[nprobe_fast]f32,
+    probe_d: *[nprobe_fast]u64,
     probe_i: *[nprobe_fast]u32,
 ) void {
     const k: usize = @intCast(reader.k);
 
     var c: usize = 0;
     while (c + block_size <= k) : (c += block_size) {
-        var cd: F32x8 = @splat(0);
+        var acc_lo: @Vector(block_size, u32) = @splat(0);
         comptime var d: usize = 0;
-        inline while (d < dims) : (d += 1) {
-            const cent: F32x8 = reader.centroids[d * k + c ..][0..block_size].*;
-            const diff = cent - @as(F32x8, @splat(query[d]));
-            cd += diff * diff;
+        inline while (d < 8) : (d += 1) {
+            const cent: I16x8 = reader.centroids[d * k + c ..][0..block_size].*;
+            const diff_i16 = cent - @as(I16x8, @splat(q16[d]));
+            const diff_i32: I32x8 = @intCast(diff_i16);
+            const sq: I32x8 = diff_i32 * diff_i32;
+            acc_lo +%= @as(@Vector(block_size, u32), @bitCast(sq));
         }
-        if (!@reduce(.Or, cd < @as(F32x8, @splat(probe_d[nprobe_fast - 1])))) continue;
-        const dists: [block_size]f32 = cd;
+        var acc_hi: @Vector(block_size, u32) = @splat(0);
+        comptime var d2: usize = 8;
+        inline while (d2 < dims) : (d2 += 1) {
+            const cent: I16x8 = reader.centroids[d2 * k + c ..][0..block_size].*;
+            const diff_i16 = cent - @as(I16x8, @splat(q16[d2]));
+            const diff_i32: I32x8 = @intCast(diff_i16);
+            const sq: I32x8 = diff_i32 * diff_i32;
+            acc_hi +%= @as(@Vector(block_size, u32), @bitCast(sq));
+        }
+
+        const lo_lanes: [block_size]u32 = acc_lo;
+        const hi_lanes: [block_size]u32 = acc_hi;
+        const worst = probe_d[nprobe_fast - 1];
+        var dists: [block_size]u64 = undefined;
+        var any_better = false;
+        inline for (0..block_size) |lane| {
+            dists[lane] = @as(u64, lo_lanes[lane]) + @as(u64, hi_lanes[lane]);
+            if (dists[lane] < worst) any_better = true;
+        }
+        if (!any_better) continue;
         inline for (0..block_size) |lane| {
             if (dists[lane] < probe_d[nprobe_fast - 1]) {
                 insertProbe(nprobe_fast, probe_d, probe_i, dists[lane], @intCast(c + lane));
@@ -330,13 +377,15 @@ fn findNearestProbes(
     }
 
     while (c < k) : (c += 1) {
-        var cd: f32 = 0;
+        var s: u64 = 0;
         comptime var d: usize = 0;
         inline while (d < dims) : (d += 1) {
-            const diff = reader.centroidAt(d, c) - query[d];
-            cd += diff * diff;
+            const diff: i32 = @as(i32, reader.centroidAt(d, c)) - @as(i32, q16[d]);
+            s += @as(u64, @intCast(diff * diff));
         }
-        insertProbe(nprobe_fast, probe_d, probe_i, cd, @intCast(c));
+        if (s < probe_d[nprobe_fast - 1]) {
+            insertProbe(nprobe_fast, probe_d, probe_i, s, @intCast(c));
+        }
     }
 }
 
