@@ -1,7 +1,24 @@
 services:
-  api1:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:sha-fbb4214cbccbed0d48b16540c864036eb036455a@sha256:3ae3656b39ffad7d2edb8d779bfd8d9b8c8b15449af5ac0cfcdf8b3981bec021
-    command: ["/sockets/api1.sock", "/index/index.bin", "1"]
+  api1: &api
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-native:sha-1b2c6c83bc4e27b367ed78bbc08bae9aab25f6b9@sha256:90eae55cf9951457cdadf25ad767a9ddf48bf50cc11b6b96cd8f9194f94fb8a6
+    command: ["server"]
+    environment:
+      LISTEN: /sockets/api1.sock
+      INDEX_PATH: /index/index.bin
+      NPROBE: "20"
+      FAST_NPROBE: "1"
+      ADAPTIVE_MIN: "2"
+      ADAPTIVE_MAX: "4"
+      EXTREME0_WORST_THRESHOLD: "3501932"
+      EXTREME1_WORST_THRESHOLD: "3569273"
+      EXTREME2_WORST_THRESHOLD: "2906420"
+      EXTREME3_WORST_THRESHOLD: "2738652"
+      EXTREME4_WORST_THRESHOLD: "3297753"
+      EXTREME5_WORST_THRESHOLD: "4594089"
+      REPAIR_MIN: "99"
+      REPAIR_MAX: "0"
+      INDEX_MMAP: "1"
+      MALLOC_ARENA_MAX: "1"
     volumes:
       - sockets:/sockets
     security_opt:
@@ -17,30 +34,31 @@ services:
           memory: "160M"
 
   api2:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-api:sha-fbb4214cbccbed0d48b16540c864036eb036455a@sha256:3ae3656b39ffad7d2edb8d779bfd8d9b8c8b15449af5ac0cfcdf8b3981bec021
-    command: ["/sockets/api2.sock", "/index/index.bin", "1"]
-    volumes:
-      - sockets:/sockets
-    security_opt:
-      - seccomp:unconfined
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
-    deploy:
-      resources:
-        limits:
-          cpus: "0.45"
-          memory: "160M"
+    <<: *api
+    environment:
+      LISTEN: /sockets/api2.sock
+      INDEX_PATH: /index/index.bin
+      NPROBE: "20"
+      FAST_NPROBE: "1"
+      ADAPTIVE_MIN: "2"
+      ADAPTIVE_MAX: "4"
+      EXTREME0_WORST_THRESHOLD: "3501932"
+      EXTREME1_WORST_THRESHOLD: "3569273"
+      EXTREME2_WORST_THRESHOLD: "2906420"
+      EXTREME3_WORST_THRESHOLD: "2738652"
+      EXTREME4_WORST_THRESHOLD: "3297753"
+      EXTREME5_WORST_THRESHOLD: "4594089"
+      REPAIR_MIN: "99"
+      REPAIR_MAX: "0"
+      INDEX_MMAP: "1"
+      MALLOC_ARENA_MAX: "1"
 
   lb:
-    image: jrblatt/so-no-forevis:v0.0.2
-    restart: always
+    image: ghcr.io/steixeira93/rinha-backend-26-v2-native:sha-1b2c6c83bc4e27b367ed78bbc08bae9aab25f6b9@sha256:90eae55cf9951457cdadf25ad767a9ddf48bf50cc11b6b96cd8f9194f94fb8a6
+    command: ["fd-lb"]
     environment:
-      - UPSTREAMS=/sockets/api1.sock,/sockets/api2.sock
-      - PORT=9999
-      - BUF_SIZE=4096
-      - WORKERS=1
+      UPSTREAMS: "/sockets/api1.sock,/sockets/api2.sock"
+      PORT: "9999"
     ports:
       - "9999:9999"
     volumes:
