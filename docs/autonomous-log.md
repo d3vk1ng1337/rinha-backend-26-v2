@@ -137,3 +137,9 @@ Próximo passo: trocar LB Zig custom por nginx.
   - adaptive {2..4} (vs {1..4}) exclui count=1 e count=5, que com fast=5 já são confiáveis
   - full=40 (vs 48) encolhe o heap top-N do findNearestProbes e cada fallback faz só 35 scans em vez de 44
 - 2026-05-13 09:51Z: H21. **bbox prune no fallback adaptativo**: quando adaptive dispara, cada cluster candidato é gatado pelo mesmo lower-bound do bbox que searchTop5 já usa. Eval offline cai mais 0.32us (7.82us mean total) sem perder E=0. Bbox compare é ~50ns/cluster e poda fração significativa dos scans.
+
+## Iteração 12 — jrblatt LB v1.0.0
+
+- 2026-05-13 12:20Z: H22. v0.0.2 da jrblatt/so-no-forevis (May 1) scoreou 5992.76 em #4055. A receita do top1 cita **v1.0.0** (May 11) explicitamente. Atualizado submission (commit b9deb99): LB de native fd-lb -> jrblatt/so-no-forevis:v1.0.0 com BUF_SIZE=4096/WORKERS=1; API mantida (native C++ + EXTREME + 0.10/0.45/0.45 CPU). Issue **#4084** aberta. Tickets pendentes (#4072 #4075 #4076) também herdam a nova compose ao iniciar.
+- Build native verificado recipe-exact: K=1280, sample=65536, iters=6, seed=42, mt19937_64, march=haswell, -mavx2 -mfma -flto, -fno-exceptions -fno-rtti -static-lib*, sem AVX-512. Nada mais óbvio para mudar no build em si.
+- Resta para próximo ciclo (se #4084 não bater 6000): testar split CPU exato da receita 0.16/0.42/0.42.
