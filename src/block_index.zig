@@ -290,7 +290,7 @@ fn searchTop5TwoTierAdaptive(
     var top = Top5{};
     inline for (0..nprobe_fast) |pi| {
         const pc = probe_i[pi];
-        if (pc != std.math.maxInt(u32)) {
+        if (pc != std.math.maxInt(u32) and (pi == 0 or bboxLowerBoundF32(reader, pc, &q16) < top.worst())) {
             scanCluster(reader, pc, &q16, &top);
         }
     }
