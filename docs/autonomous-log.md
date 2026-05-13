@@ -169,3 +169,18 @@ Próximo passo: trocar LB Zig custom por nginx.
   - **#4087 (17:01Z): 6000.00** ✓ — última, ranking final
 - 2/5 runs (40%) cravaram o teto perfeito; outros 3/5 ficaram entre 5997.36 e 5999.26 (variance do rig).
 - **Resultado final: top1 com 6000.00 / p99 0.98ms / FP=FN=err=0 / weighted_E=0**.
+
+## Iteração 15 — Plano sub-1ms p99 consistente (novo objetivo)
+
+- 2026-05-13 18:00Z: novo goal após top1 garantido. Foco: 5/5 runs sub-1ms p99 (score já no teto, agora consistência).
+- **Onde está o tail**: fast tier ~5-10us, adaptive fallback NPROBE=20+bbox ~50us dispara em ~2-5% das queries, jitter Mac Mini ~10-100us irredutível.
+- **Hipótese 1 — EXTREME tunadas**: os 6 thresholds atuais foram herdados verbatim do top1 (k-means dele). Calibrar com o nosso index pode reduzir fallback rate significativamente.
+- **Plano técnico Phase 1**:
+  1. Criar `cmd/dump_worst_dist/main.zig` (ou estender `cmd/eval_block`) que para cada query do test-data.json:
+     - Roda fast search NPROBE=1 → (fast_count, fast_worst_dist)
+     - Roda referência full NPROBE=20+bbox → ref_count
+     - Emite tupla (fast_count, fast_worst_dist, match=fast_count==ref_count)
+  2. Per fast_count class (0..5): coletar max(fast_worst_dist) onde match=true. Esse é o threshold seguro pra class.
+  3. Setar novas EXTREME thresholds offline → rodar eval_block extreme mode → verificar weighted_E=0.
+  4. Update submission docker-compose.yml com novos EXTREMEs (env vars, sem rebuild de imagem!), push, abrir UMA issue, esperar.
+- **Vantagem crítica**: as EXTREME thresholds são env vars no compose. Não precisa rebuild de imagem nem CI — só editar 6 números e abrir issue.
