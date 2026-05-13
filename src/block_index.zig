@@ -303,7 +303,7 @@ fn searchTop5TwoTierAdaptive(
     if (fraud_count >= adaptive_min and fraud_count <= adaptive_max) {
         inline for (nprobe_fast..nprobe_full) |pi| {
             const pc = probe_i[pi];
-            if (pc != std.math.maxInt(u32)) {
+            if (pc != std.math.maxInt(u32) and bboxLowerBoundF32(reader, pc, &q16) < top.worst()) {
                 scanCluster(reader, pc, &q16, &top);
             }
         }
