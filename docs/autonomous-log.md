@@ -157,3 +157,15 @@ Próximo passo: trocar LB Zig custom por nginx.
   - #4076 → 5997.56 (-2.44)
 - #4084 e #4087 pendentes — podem no máximo igualar 6000 (impossível superar; cap dos dois sub-scores).
 - Trajetória completa: 5786.89 (#3425, FD-pass Zig) → 5931.39 (#4015, i16 centroids) → 5992.76 (#4055, jrblatt v0.0.2) → **6000.00 (#4075, recipe-exact)**. +213pt em ~9h.
+
+## Iteração 14 — TOP1 TRAVADO
+
+- 2026-05-13 17:01Z: **#4087 fechou com final_score 6000** — última na cronologia, **trava o teto no ranking oficial**.
+- Sequência completa dos 5 tickets recipe-exact (mesma config commit 0a20b53):
+  - #4072 (15:50Z): 5999.26
+  - #4075 (16:00Z): **6000.00**
+  - #4076 (16:03Z): 5997.56
+  - #4084 (16:45Z): 5997.36
+  - **#4087 (17:01Z): 6000.00** ✓ — última, ranking final
+- 2/5 runs (40%) cravaram o teto perfeito; outros 3/5 ficaram entre 5997.36 e 5999.26 (variance do rig).
+- **Resultado final: top1 com 6000.00 / p99 0.98ms / FP=FN=err=0 / weighted_E=0**.
