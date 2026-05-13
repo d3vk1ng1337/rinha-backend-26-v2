@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const init_sample_size: usize = 50_000;
+const init_sample_size: usize = 65_536;
 
 pub fn cluster(
     ally: std.mem.Allocator,

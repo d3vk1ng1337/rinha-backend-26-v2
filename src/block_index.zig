@@ -5,13 +5,22 @@ pub const block_size: usize = 8;
 pub const header_size: usize = 64;
 pub const magic: u64 = 0x3256_4949_484E_4952;
 pub const version: u32 = 2;
-pub const default_nprobe_fast: usize = 5;
-pub const default_nprobe_full: usize = 40;
-pub const default_adaptive_min: u8 = 2;
+pub const default_nprobe_fast: usize = 2;
+pub const default_nprobe_full: usize = 16;
+pub const default_adaptive_min: u8 = 1;
 pub const default_adaptive_max: u8 = 4;
 pub const max_clusters: usize = 16_384;
 const q16_scale: f32 = 0.0001;
 const q16_dist_scale: f32 = 1e-8;
+
+pub const extreme_worst_thresholds: [6]f32 = .{
+    3501932.0 * q16_dist_scale,
+    3569273.0 * q16_dist_scale,
+    2906420.0 * q16_dist_scale,
+    2738652.0 * q16_dist_scale,
+    3297753.0 * q16_dist_scale,
+    4594089.0 * q16_dist_scale,
+};
 const I16x8 = @Vector(8, i16);
 const I32x8 = @Vector(8, i32);
 const F32x8 = @Vector(8, f32);
@@ -202,6 +211,20 @@ pub fn searchFraudCountTwoTierAdaptive(
     return count;
 }
 
+pub fn searchFraudCountExtreme(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    comptime nprobe_fast: usize,
+    comptime nprobe_full: usize,
+) u8 {
+    const top = searchTop5Extreme(reader, query, nprobe_fast, nprobe_full);
+    var count: u8 = 0;
+    for (top.labels) |label| {
+        if (label == 1) count += 1;
+    }
+    return count;
+}
+
 const Top5 = struct {
     dists: [5]f32 = .{std.math.inf(f32)} ** 5,
     labels: [5]u8 = .{0} ** 5,
@@ -264,6 +287,50 @@ fn searchTop5TwoTier(
     comptime nprobe_full: usize,
 ) Top5 {
     return searchTop5TwoTierAdaptive(reader, query, nprobe_fast, nprobe_full, 2, 3);
+}
+
+fn searchTop5Extreme(
+    reader: *const Reader,
+    query: *const [dims]f32,
+    comptime nprobe_fast: usize,
+    comptime nprobe_full: usize,
+) Top5 {
+    comptime {
+        std.debug.assert(nprobe_fast > 0);
+        std.debug.assert(nprobe_full >= nprobe_fast);
+        std.debug.assert(nprobe_full <= max_clusters);
+    }
+    var q16: [dims]i16 = undefined;
+    quantize16(query, &q16);
+
+    var probe_d: [nprobe_full]u64 = .{std.math.maxInt(u64)} ** nprobe_full;
+    var probe_i: [nprobe_full]u32 = .{std.math.maxInt(u32)} ** nprobe_full;
+    findNearestProbes(reader, &q16, nprobe_full, &probe_d, &probe_i);
+
+    var top = Top5{};
+    inline for (0..nprobe_fast) |pi| {
+        const pc = probe_i[pi];
+        if (pc != std.math.maxInt(u32) and (pi == 0 or bboxLowerBoundF32(reader, pc, &q16) < top.worst())) {
+            scanCluster(reader, pc, &q16, &top);
+        }
+    }
+
+    var fraud_count: u8 = 0;
+    for (top.labels) |label| {
+        if (label == 1) fraud_count += 1;
+    }
+
+    if (top.worst() >= extreme_worst_thresholds[fraud_count]) {
+        var pi: usize = nprobe_fast;
+        while (pi < nprobe_full) : (pi += 1) {
+            const pc = probe_i[pi];
+            if (pc != std.math.maxInt(u32) and bboxLowerBoundF32(reader, pc, &q16) < top.worst()) {
+                scanCluster(reader, pc, &q16, &top);
+            }
+        }
+    }
+
+    return top;
 }
 
 fn searchTop5TwoTierAdaptive(

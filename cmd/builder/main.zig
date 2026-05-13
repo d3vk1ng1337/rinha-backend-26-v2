@@ -6,8 +6,8 @@ const block_index = lib.block_index;
 const kmeans = lib.kmeans;
 
 const dim: usize = 14;
-const num_centroids: usize = 4096;
-const kmeans_iters: usize = 3;
+const num_centroids: usize = 1280;
+const kmeans_iters: usize = 6;
 
 pub fn main(init: std.process.Init) !void {
     const ally = init.arena.allocator();

@@ -5,6 +5,16 @@ const fast_parser = lib.fast_parser;
 
 const dim = block_index.dims;
 const variants = [_]Variant{
+    .{ .name = "extreme_fast1_full20", .mode = .extreme, .fast = 1, .full = 20, .amin = 0, .amax = 0 },
+    .{ .name = "extreme_fast1_full24", .mode = .extreme, .fast = 1, .full = 24, .amin = 0, .amax = 0 },
+    .{ .name = "extreme_fast1_full16", .mode = .extreme, .fast = 1, .full = 16, .amin = 0, .amax = 0 },
+    .{ .name = "extreme_fast2_full20", .mode = .extreme, .fast = 2, .full = 20, .amin = 0, .amax = 0 },
+    .{ .name = "fast1_full20_a14_k1280", .mode = .two_tier, .fast = 1, .full = 20, .amin = 1, .amax = 4 },
+    .{ .name = "fast1_full24_a14_k1280", .mode = .two_tier, .fast = 1, .full = 24, .amin = 1, .amax = 4 },
+    .{ .name = "fast1_full20_a05_k1280", .mode = .two_tier, .fast = 1, .full = 20, .amin = 0, .amax = 5 },
+    .{ .name = "fast2_full20_a14_k1280", .mode = .two_tier, .fast = 2, .full = 20, .amin = 1, .amax = 4 },
+    .{ .name = "fast2_full24_a14_k1280", .mode = .two_tier, .fast = 2, .full = 24, .amin = 1, .amax = 4 },
+    .{ .name = "fast2_full16_a14_k1280", .mode = .two_tier, .fast = 2, .full = 16, .amin = 1, .amax = 4 },
     .{ .name = "prod_fast8_full48_a23", .mode = .two_tier, .fast = 8, .full = 48, .amin = 2, .amax = 3 },
     .{ .name = "fast4_full48_a14", .mode = .two_tier, .fast = 4, .full = 48, .amin = 1, .amax = 4 },
     .{ .name = "fast5_full48_a14", .mode = .two_tier, .fast = 5, .full = 48, .amin = 1, .amax = 4 },
@@ -47,7 +57,7 @@ const variants = [_]Variant{
 };
 
 const Variant = struct {
-    const Mode = enum { bbox_all, two_tier };
+    const Mode = enum { bbox_all, two_tier, extreme };
 
     name: []const u8,
     mode: Mode,
@@ -122,6 +132,7 @@ pub fn main(init: std.process.Init) !void {
             const count = switch (variant.mode) {
                 .bbox_all => block_index.searchFraudCount(&reader, &f, variant.fast),
                 .two_tier => block_index.searchFraudCountTwoTierAdaptive(&reader, &f, variant.fast, variant.full, variant.amin, variant.amax),
+                .extreme => block_index.searchFraudCountExtreme(&reader, &f, variant.fast, variant.full),
             };
             const t1 = std.Io.Clock.Timestamp.now(io, .awake);
             hists[vi].search_time_ns += t0.durationTo(t1).raw.nanoseconds;
