@@ -175,6 +175,7 @@ public:
                 close(fd);
                 index_fatal();
             }
+            (void)madvise(raw_, size_, MADV_HUGEPAGE);
             (void)madvise(raw_, size_, MADV_WILLNEED);
             close(fd);
         } else {
