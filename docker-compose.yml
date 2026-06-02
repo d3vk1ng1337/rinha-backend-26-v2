@@ -1,6 +1,6 @@
 services:
   api1: &api
-    image: ghcr.io/d3vk1ng1337/rinha-backend-26-v2-native:sha-174280dc575076365e7635e6ceae1b4223c3bc61@sha256:c659b6a9547e648dbed4685d8bed94ea6d9272d5c1e0996871a37e44b067735c
+    image: ghcr.io/d3vk1ng1337/rinha-backend-26-v2-native:sha-ca8d5dc4b5506e31b9156eb4d2ea50467dac6421@sha256:ef6c5ed79b284539d872eb7e7a6c0f540d7dd273517ebe69913b235c763ac4b9
     command: ["server"]
     environment:
       LISTEN: /sockets/api1.sock
@@ -52,7 +52,7 @@ services:
       MALLOC_ARENA_MAX: "1"
 
   lb:
-    image: ghcr.io/d3vk1ng1337/rinha-backend-26-v2-native:sha-174280dc575076365e7635e6ceae1b4223c3bc61@sha256:c659b6a9547e648dbed4685d8bed94ea6d9272d5c1e0996871a37e44b067735c
+    image: ghcr.io/d3vk1ng1337/rinha-backend-26-v2-native:sha-ca8d5dc4b5506e31b9156eb4d2ea50467dac6421@sha256:ef6c5ed79b284539d872eb7e7a6c0f540d7dd273517ebe69913b235c763ac4b9
     command: ["fd-lb"]
     environment:
       - UPSTREAMS=/sockets/api1.sock,/sockets/api2.sock
