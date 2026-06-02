@@ -18,3 +18,10 @@
 - With the time fix, the AVX2 diagnostic over all 54,100 current preview entries reports:
   - `repair_count` (`NPROBE=20`, `REPAIR_MIN=0`, `REPAIR_MAX=5`) = FP=0, FN=0, E=0.
   - baseline fast thresholds still leave FP=5/FN=8, so the next submission config should set `FAST_NPROBE=0` and always use the repaired search until a safe fast-tier policy is recalibrated.
+
+## 2026-06-02 - Official preview with time fix
+
+- Official issue `#7954` ran the `d3vk1ng1337-zig` submission at commit `be55ec7`, pinned to native image `sha-ca8d5dc4b5506e31b9156eb4d2ea50467dac6421@sha256:ef6c5ed79b284539d872eb7e7a6c0f540d7dd273517ebe69913b235c763ac4b9`.
+- Result: FP=0, FN=0, HTTP_errors=0, weighted_E=0, detection_score=3000.
+- p99 was 1.80857086 ms, p99_score=2742.6644708646986, final_score=5742.664470864698.
+- Next target is latency only: preserve the full offline gate at E=0 while reducing p99 below 1 ms. The first likely lever is recalibrating a safe fast-tier policy, because the submission currently forces repaired search for every request (`FAST_NPROBE=0`, `REPAIR_MIN=0`, `REPAIR_MAX=5`).
