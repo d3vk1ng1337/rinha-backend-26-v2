@@ -25,3 +25,10 @@
 - Result: FP=0, FN=0, HTTP_errors=0, weighted_E=0, detection_score=3000.
 - p99 was 1.80857086 ms, p99_score=2742.6644708646986, final_score=5742.664470864698.
 - Next target is latency only: preserve the full offline gate at E=0 while reducing p99 below 1 ms. The first likely lever is recalibrating a safe fast-tier policy, because the submission currently forces repaired search for every request (`FAST_NPROBE=0`, `REPAIR_MIN=0`, `REPAIR_MAX=5`).
+
+## 2026-06-02 - Safe fast-tier re-enable after time fix
+
+- Re-enabled `FAST_NPROBE=1` locally against the published timefix image with the previous EXTREME thresholds. The amd64 HTTP gate reported FP=0, FN=2, HTTP_errors=0, weighted_E=6. Both mismatches were fraud transactions returned as `fraud_score=0.4`, i.e. fast-count 2 was the unsafe class.
+- Tested a conservative fallback policy by setting `EXTREME2_WORST_THRESHOLD=0`. In the current server logic, that disables the class threshold for fast-count 2 and lets `ADAPTIVE_MIN=2` force the full repaired search only for that class.
+- Result with `FAST_NPROBE=1`, `EXTREME2_WORST_THRESHOLD=0`, `NPROBE=20`, `REPAIR_MIN=0`, `REPAIR_MAX=5`: FP=0, FN=0, HTTP_errors=0, weighted_E=0 over all 54,100 current preview entries.
+- Decision: publish this env-only change to `submission`. It should reduce p99 versus repair-universal while preserving the same E=0 gate. No new native image is required.

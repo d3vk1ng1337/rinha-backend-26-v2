@@ -8,7 +8,7 @@ The Zig `cmd/dump_worst_dist` analysis runs on arm64 (Mac) and uses different SI
 
 ## How it works
 
-`deploy/docker-compose.gate.yml` spins up the production `ghcr.io/steixeira93/rinha-backend-26-v2-native` image (linux/amd64, runs under rosetta on Mac) with the index baked in. HAProxy fronts the unix sockets on `:3457` because the production `jrblatt/so-no-forevis` LB uses io_uring which is unsupported under rosetta.
+`deploy/docker-compose.gate.yml` spins up the production `ghcr.io/d3vk1ng1337/rinha-backend-26-v2-native` image (linux/amd64, runs under rosetta on Mac) with the index baked in. HAProxy fronts the unix sockets on `:3457` so the gate can run locally without relying on the official rig.
 
 `tools/offline-gate.py` replays all 54,100 entries from `test/test-data.json`, compares response.approved against entry.expected_approved, and tallies FP/FN/HTTP errors. Its `weighted_E` field follows the official scoring formula: `FP + 3*FN + 5*HTTP_errors`.
 
