@@ -50,3 +50,12 @@
   - `NPROBE=16`: mean 36,917 ns, p95 82,523 ns, p99 118,326 ns.
   - `NPROBE=20`: mean 38,773 ns, p95 87,691 ns, p99 128,454 ns.
 - Decision: publish `NPROBE=12` as an env-only latency improvement. It reduces mean and p95 versus the current official baseline while keeping p99 essentially tied with the best measured point and does not add a fast pre-pass to fallback requests.
+
+## 2026-06-02 - NPROBE rollback and repair class narrowing
+
+- Re-ran the direct amd64 diagnostic against the exact `index.bin` extracted from the published image. The repeated run did not support `NPROBE=12` as a robust improvement: `NPROBE=20` remained competitive or better in the direct p99, and it is the last official-good setting from issue `#7954`.
+- Reverted the submission-only `NPROBE=12` change and restored `NPROBE=20`, `FAST_NPROBE=0`, `REPAIR_MIN=0`, `REPAIR_MAX=5` before trying further changes.
+- Tested repair ranges with `NPROBE=20`. `REPAIR_MIN=1`, `REPAIR_MAX=4` preserved FP=0/FN=0 in the direct diagnostic while reducing repair rate from 100% to about 3.7% and direct p99 from about 125 us to about 45 us.
+- Validated `REPAIR_MIN=1`, `REPAIR_MAX=4` through the HTTP offline gate against the real server path: FP=0, FN=0, HTTP_errors=0, weighted_E=0 over all 54,100 preview entries.
+- Local fd-lb k6 A/B on the same published image improved from p99 4.52952 ms (`NPROBE=20`, repair `0..5`) to p99 2.86142 ms (repair `1..4`) while keeping weighted_E=0.
+- Decision: publish the env-only submission change `REPAIR_MIN=1`, `REPAIR_MAX=4` at submission commit `fe78507`. Do not open another official issue unless explicitly requested.
