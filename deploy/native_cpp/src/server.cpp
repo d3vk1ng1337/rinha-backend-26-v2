@@ -154,6 +154,15 @@ inline int epoch_minutes_fast(std::string_view ts) {
     return epoch_minutes(ts);
 }
 
+inline int minutes_between_fast(std::string_view requested_at, std::string_view last_ts) {
+    if (is_march_2026(requested_at) && is_march_2026(last_ts)) {
+        return ((two(requested_at, 8) - two(last_ts, 8)) * 1440)
+            + ((two(requested_at, 11) - two(last_ts, 11)) * 60)
+            + (two(requested_at, 14) - two(last_ts, 14));
+    }
+    return epoch_minutes(requested_at) - epoch_minutes(last_ts);
+}
+
 inline int weekday_monday0_fast(std::string_view ts) {
     if (is_march_2026(ts)) {
         return (two(ts, 8) + 5) % 7;
@@ -217,11 +226,16 @@ bool vectorize_fast(std::string_view body, int16_t out[Dims]) {
 
     int h = two(requested_at, 11);
 
-    out[0] = rinha::qclamp01(amount / 10000.0);
-    out[1] = rinha::qclamp01(installments_d / 12.0);
-    out[2] = rinha::qclamp01((amount / customer_avg) / 10.0);
-    out[3] = rinha::qclamp01(double(h) / 23.0);
-    out[4] = rinha::qclamp01(double(weekday_monday0_fast(requested_at)) / 6.0);
+    double v0 = amount / 10000.0;
+    double v1 = installments_d / 12.0;
+    double v2 = (amount / customer_avg) / 10.0;
+    double v3 = double(h) / 23.0;
+    double v4 = double(weekday_monday0_fast(requested_at)) / 6.0;
+    out[0] = rinha::qclamp01(v0);
+    out[1] = rinha::qclamp01(v1);
+    out[2] = rinha::qclamp01(v2);
+    out[3] = rinha::qclamp01(v3);
+    out[4] = rinha::qclamp01(v4);
 
     size_t last = body.find("\"last_transaction\"", p);
     if (last == std::string_view::npos) return false;
@@ -237,18 +251,23 @@ bool vectorize_fast(std::string_view body, int16_t out[Dims]) {
         double last_km = 0;
         if (!string_fast(body, p, "\"timestamp\"", last_ts) || last_ts.size() < 16) return false;
         if (!number_fast(body, p, "\"km_from_current\"", last_km)) return false;
-        int minutes = epoch_minutes_fast(requested_at) - epoch_minutes_fast(last_ts);
-        out[5] = rinha::qclamp01(double(minutes) / 1440.0);
-        out[6] = rinha::qclamp01(last_km / 1000.0);
+        int minutes = minutes_between_fast(requested_at, last_ts);
+        double v5 = double(minutes) / 1440.0;
+        double v6 = last_km / 1000.0;
+        out[5] = rinha::qclamp01(v5);
+        out[6] = rinha::qclamp01(v6);
     }
 
-    out[7] = rinha::qclamp01(km_from_home / 1000.0);
-    out[8] = rinha::qclamp01(tx_count_d / 20.0);
+    double v7 = km_from_home / 1000.0;
+    double v8 = tx_count_d / 20.0;
+    double v13 = merchant_avg / 10000.0;
+    out[7] = rinha::qclamp01(v7);
+    out[8] = rinha::qclamp01(v8);
     out[9] = is_online ? 10000 : 0;
     out[10] = card_present ? 10000 : 0;
     out[11] = known_merchants.find(merchant_id) == std::string_view::npos ? 10000 : 0;
     out[12] = mcc_risk_q(mcc);
-    out[13] = rinha::qclamp01(merchant_avg / 10000.0);
+    out[13] = rinha::qclamp01(v13);
     return true;
 }
 
