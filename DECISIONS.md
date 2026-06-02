@@ -40,3 +40,13 @@
 - p99 regressed from `#7954`'s 1.80857086 ms to 1.8468878100000004 ms, dropping final_score from 5742.664470864698 to 5733.559485164935.
 - Working hypothesis: this fast tier improves common-case work but not p99. The p99 is dominated by fallback requests, and those now pay `fast + full repaired search`, making the tail slightly worse.
 - Decision: restore the submission default to the best official state known from `#7954`: `FAST_NPROBE=0`, `EXTREME2_WORST_THRESHOLD=2906420`, `NPROBE=20`, `REPAIR_MIN=0`, `REPAIR_MAX=5`. Future latency work must reduce the full/repaired tail itself rather than adding a pre-pass.
+
+## 2026-06-02 - Full-path NPROBE retune
+
+- Built a temporary amd64 diagnostic (`.tmp/measure_search.cpp`, not committed) that runs `MappedIndex::search()` directly over all 54,100 preview requests and records `SearchStats`.
+- With repair universal (`REPAIR_MIN=0`, `REPAIR_MAX=5`), all tested NPROBE values preserved FP=0/FN=0. Direct search timings on linux/amd64 under Docker:
+  - `NPROBE=8`: mean 37,475 ns, p95 84,774 ns, p99 123,911 ns.
+  - `NPROBE=12`: mean 36,506 ns, p95 81,941 ns, p99 118,659 ns.
+  - `NPROBE=16`: mean 36,917 ns, p95 82,523 ns, p99 118,326 ns.
+  - `NPROBE=20`: mean 38,773 ns, p95 87,691 ns, p99 128,454 ns.
+- Decision: publish `NPROBE=12` as an env-only latency improvement. It reduces mean and p95 versus the current official baseline while keeping p99 essentially tied with the best measured point and does not add a fast pre-pass to fallback requests.

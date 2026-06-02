@@ -6,7 +6,7 @@ services:
     environment:
       LISTEN: /sockets/api1.sock
       INDEX_PATH: /index/index.bin
-      NPROBE: "${NPROBE:-20}"
+      NPROBE: "${NPROBE:-12}"
       FAST_NPROBE: "${FAST_NPROBE:-0}"
       ADAPTIVE_MIN: "${ADAPTIVE_MIN:-2}"
       ADAPTIVE_MAX: "${ADAPTIVE_MAX:-4}"
@@ -30,7 +30,7 @@ services:
     environment:
       LISTEN: /sockets/api2.sock
       INDEX_PATH: /index/index.bin
-      NPROBE: "${NPROBE:-20}"
+      NPROBE: "${NPROBE:-12}"
       FAST_NPROBE: "${FAST_NPROBE:-0}"
       ADAPTIVE_MIN: "${ADAPTIVE_MIN:-2}"
       ADAPTIVE_MAX: "${ADAPTIVE_MAX:-4}"
