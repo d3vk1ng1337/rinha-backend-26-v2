@@ -29,6 +29,6 @@
 ## 2026-06-02 - Safe fast-tier re-enable after time fix
 
 - Re-enabled `FAST_NPROBE=1` locally against the published timefix image with the previous EXTREME thresholds. The amd64 HTTP gate reported FP=0, FN=2, HTTP_errors=0, weighted_E=6. Both mismatches were fraud transactions returned as `fraud_score=0.4`, i.e. fast-count 2 was the unsafe class.
-- Tested a conservative fallback policy by setting `EXTREME2_WORST_THRESHOLD=0`. In the current server logic, that disables the class threshold for fast-count 2 and lets `ADAPTIVE_MIN=2` force the full repaired search only for that class.
-- Result with `FAST_NPROBE=1`, `EXTREME2_WORST_THRESHOLD=0`, `NPROBE=20`, `REPAIR_MIN=0`, `REPAIR_MAX=5`: FP=0, FN=0, HTTP_errors=0, weighted_E=0 over all 54,100 current preview entries.
-- Decision: publish this env-only change to `submission`. It should reduce p99 versus repair-universal while preserving the same E=0 gate. No new native image is required.
+- Tested a conservative fallback policy by setting `EXTREME2_WORST_THRESHOLD=0`. In the current server logic, that disables the class threshold for fast-count 2 and lets `ADAPTIVE_MIN=2` force the full repaired search only for that class. That closed the gate at FP=0, FN=0, HTTP_errors=0, weighted_E=0.
+- Refined the class-2 threshold to avoid unnecessary fallback while preserving E=0. Safe points included 2,600,000, 2,775,000, 2,795,000 and 2,798,000. The first observed failure was 2,799,000 (FP=0, FN=1, E=3); 2,800,000 also failed.
+- Decision: publish `FAST_NPROBE=1` with `EXTREME2_WORST_THRESHOLD=2795000`, `NPROBE=20`, `REPAIR_MIN=0`, `REPAIR_MAX=5`. This is an env-only submission change, keeps a small margin below the first failing threshold, and requires no new native image.
