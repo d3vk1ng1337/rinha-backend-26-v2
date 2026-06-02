@@ -59,3 +59,12 @@
 - Validated `REPAIR_MIN=1`, `REPAIR_MAX=4` through the HTTP offline gate against the real server path: FP=0, FN=0, HTTP_errors=0, weighted_E=0 over all 54,100 preview entries.
 - Local fd-lb k6 A/B on the same published image improved from p99 4.52952 ms (`NPROBE=20`, repair `0..5`) to p99 2.86142 ms (repair `1..4`) while keeping weighted_E=0.
 - Decision: publish the env-only submission change `REPAIR_MIN=1`, `REPAIR_MAX=4` at submission commit `fe78507`. Do not open another official issue unless explicitly requested.
+
+## 2026-06-02 - Official issue creation blocked
+
+- User explicitly requested a new official rig test for `d3vk1ng1337-zig` after the `fe78507` submission change.
+- Verified the submission branch was clean and pushed at `fe78507bfcb74cde8b8e6aa520ac5493a53f1139`; `docker compose config` succeeded and no banned compose options were present.
+- Attempts to create a new official issue from the active `d3vk1ng1337` account failed externally: REST issue creation returned HTTP 403 `Blocked`, while `gh issue create`/GraphQL returned HTTP 200 with `createIssue.issue = null` and no issue appeared in the repo.
+- Reopening prior issue `#7967` was not possible: the official repo API requires admin rights to set the closed issue back to open.
+- Tried the same issue creation path with `steixeira93` only as a fallback trigger account; no new issue appeared. Active GitHub account was restored to `d3vk1ng1337`.
+- Decision: no official test is currently running. Next attempt should use a fresh issue after the GitHub anti-abuse block clears, or a manual browser-created issue if the web UI allows it.
