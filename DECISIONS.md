@@ -32,3 +32,11 @@
 - Tested a conservative fallback policy by setting `EXTREME2_WORST_THRESHOLD=0`. In the current server logic, that disables the class threshold for fast-count 2 and lets `ADAPTIVE_MIN=2` force the full repaired search only for that class. That closed the gate at FP=0, FN=0, HTTP_errors=0, weighted_E=0.
 - Refined the class-2 threshold to avoid unnecessary fallback while preserving E=0. Safe points included 2,600,000, 2,775,000, 2,795,000 and 2,798,000. The first observed failure was 2,799,000 (FP=0, FN=1, E=3); 2,800,000 also failed.
 - Decision: publish `FAST_NPROBE=1` with `EXTREME2_WORST_THRESHOLD=2795000`, `NPROBE=20`, `REPAIR_MIN=0`, `REPAIR_MAX=5`. This is an env-only submission change, keeps a small margin below the first failing threshold, and requires no new native image.
+
+## 2026-06-02 - Official fast-tier preview regression
+
+- Official issue `#7967` tested commit `e26a921` with `FAST_NPROBE=1` and `EXTREME2_WORST_THRESHOLD=2795000`.
+- Result remained detection-perfect: FP=0, FN=0, HTTP_errors=0, weighted_E=0, detection_score=3000.
+- p99 regressed from `#7954`'s 1.80857086 ms to 1.8468878100000004 ms, dropping final_score from 5742.664470864698 to 5733.559485164935.
+- Working hypothesis: this fast tier improves common-case work but not p99. The p99 is dominated by fallback requests, and those now pay `fast + full repaired search`, making the tail slightly worse.
+- Decision: restore the submission default to the best official state known from `#7954`: `FAST_NPROBE=0`, `EXTREME2_WORST_THRESHOLD=2906420`, `NPROBE=20`, `REPAIR_MIN=0`, `REPAIR_MAX=5`. Future latency work must reduce the full/repaired tail itself rather than adding a pre-pass.
