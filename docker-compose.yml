@@ -1,12 +1,12 @@
 services:
   api1: &api
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-native:sha-1b2c6c83bc4e27b367ed78bbc08bae9aab25f6b9@sha256:90eae55cf9951457cdadf25ad767a9ddf48bf50cc11b6b96cd8f9194f94fb8a6
+    image: ghcr.io/d3vk1ng1337/rinha-backend-26-v2-native:sha-174280dc575076365e7635e6ceae1b4223c3bc61@sha256:c659b6a9547e648dbed4685d8bed94ea6d9272d5c1e0996871a37e44b067735c
     command: ["server"]
     environment:
       LISTEN: /sockets/api1.sock
       INDEX_PATH: /index/index.bin
       NPROBE: "20"
-      FAST_NPROBE: "1"
+      FAST_NPROBE: "0"
       ADAPTIVE_MIN: "2"
       ADAPTIVE_MAX: "4"
       EXTREME0_WORST_THRESHOLD: "3501932"
@@ -15,8 +15,8 @@ services:
       EXTREME3_WORST_THRESHOLD: "2738652"
       EXTREME4_WORST_THRESHOLD: "3297753"
       EXTREME5_WORST_THRESHOLD: "4594089"
-      REPAIR_MIN: "99"
-      REPAIR_MAX: "0"
+      REPAIR_MIN: "0"
+      REPAIR_MAX: "5"
       INDEX_MMAP: "1"
       MALLOC_ARENA_MAX: "1"
     volumes:
@@ -37,7 +37,7 @@ services:
       LISTEN: /sockets/api2.sock
       INDEX_PATH: /index/index.bin
       NPROBE: "20"
-      FAST_NPROBE: "1"
+      FAST_NPROBE: "0"
       ADAPTIVE_MIN: "2"
       ADAPTIVE_MAX: "4"
       EXTREME0_WORST_THRESHOLD: "3501932"
@@ -46,13 +46,13 @@ services:
       EXTREME3_WORST_THRESHOLD: "2738652"
       EXTREME4_WORST_THRESHOLD: "3297753"
       EXTREME5_WORST_THRESHOLD: "4594089"
-      REPAIR_MIN: "99"
-      REPAIR_MAX: "0"
+      REPAIR_MIN: "0"
+      REPAIR_MAX: "5"
       INDEX_MMAP: "1"
       MALLOC_ARENA_MAX: "1"
 
   lb:
-    image: ghcr.io/steixeira93/rinha-backend-26-v2-native:sha-1b2c6c83bc4e27b367ed78bbc08bae9aab25f6b9@sha256:90eae55cf9951457cdadf25ad767a9ddf48bf50cc11b6b96cd8f9194f94fb8a6
+    image: ghcr.io/d3vk1ng1337/rinha-backend-26-v2-native:sha-174280dc575076365e7635e6ceae1b4223c3bc61@sha256:c659b6a9547e648dbed4685d8bed94ea6d9272d5c1e0996871a37e44b067735c
     command: ["fd-lb"]
     environment:
       - UPSTREAMS=/sockets/api1.sock,/sockets/api2.sock
